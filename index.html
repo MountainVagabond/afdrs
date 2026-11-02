@@ -36,10 +36,38 @@
     .panel.collapsed #days{margin-top:6px}
     .panel.collapsed #status{margin-top:4px}
   }
+  /* ---- search bar, pins ---- */
+  #searchbar{position:absolute;z-index:1001;left:10px;bottom:26px;display:flex;gap:4px;background:#fff;padding:5px;border-radius:8px;
+             box-shadow:0 2px 10px rgba(0,0,0,.3);width:min(400px,calc(100vw - 40px));box-sizing:border-box}
+  #q{flex:1;min-width:0;font-size:16px;padding:5px 7px;border:1px solid #bbb;border-radius:4px}
+  #searchbar button{font-size:16px;line-height:1;padding:4px 7px;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;cursor:pointer}
+  #searchbar button.on{background:#c8102e;border-color:#c8102e}
+  #results{position:absolute;z-index:1001;left:10px;bottom:72px;width:min(400px,calc(100vw - 40px));box-sizing:border-box;background:#fff;
+           border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.3);max-height:40vh;overflow:auto;font-size:13px}
+  #results:empty{display:none}
+  #results div{padding:8px 10px;border-bottom:1px solid #eee;cursor:pointer}
+  #results div:hover{background:#f4f4f4}
+  #results .msg{cursor:default;color:#666}
+  .pinicon{width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #222;box-shadow:0 1px 4px rgba(0,0,0,.5);position:relative}
+  .pinicon::after{content:"";position:absolute;left:6px;top:6px;width:8px;height:8px;border-radius:50%;background:#222}
+  .pinpop{min-width:190px;font-size:12px}
+  .pinpop input{width:100%;box-sizing:border-box;font:600 13px system-ui,sans-serif;padding:3px 5px;border:1px solid #ccc;border-radius:4px}
+  .pinpop .pc{margin:6px 0;color:#333;line-height:1.5}
+  .pinpop .fdr{margin:4px 0 8px}.pinpop .fdr b{padding:1px 6px;border-radius:3px;border:1px solid #999}
+  .pinpop .pb{display:flex;gap:4px}.pinpop .pb button,.pinpop .pb a{flex:1;font-size:12px;padding:4px;text-align:center;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;color:#222;text-decoration:none;cursor:pointer}
+  #pinlist div{display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px}
+  #pinlist span.sw{width:10px;height:10px;border-radius:50%;border:1px solid #333;flex:none}
 </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="results"></div>
+<div id="searchbar">
+  <input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="Address, lat/long or MGA55 E N">
+  <button id="go" title="Search">🔍</button>
+  <button id="pinmode" title="Drop a pin: tap this, then tap the map (or long-press / right-click the map)">📍</button>
+  <button id="locate" title="Show my location">🎯</button>
+</div>
 <div class="panel" id="panel">
   <h1>TFS Fire Danger Rating</h1>
   <button id="toggle">Show / hide controls</button>
@@ -111,6 +139,8 @@
     <button id="exp">Copy alignment</button>
     <button id="imp">Paste alignment</button>
   </div>
+  <label>Pins <button id="clearpins" style="float:right;font-size:11px;padding:1px 6px;cursor:pointer">Clear all</button></label>
+  <div id="pinlist" class="small">No pins yet — long-press the map or use 📍.</div>
   <label>Load PNG from file</label>
   <input type="file" id="file" accept="image/png,image/*" style="width:100%;font-size:12px">
   <div class="small" id="status">Loading overlay…</div>
@@ -352,6 +382,7 @@ function useImage(img, msg){
   try { srcImg = keyed(img); srcBlend = false; } catch(e){ srcImg = img; srcBlend = true; }
   render();
   statusEl.textContent = msg;
+  if (typeof refreshPins === 'function') refreshPins();
 }
 function loadDay(d){
   statusEl.textContent = 'Loading…';
@@ -549,6 +580,189 @@ $('imp').onclick = () => {
   const t = prompt('Paste alignment text:'); if(!t) return;
   try { const m = JSON.parse(t); if(!m.n || !m.nodes || m.nodes.length !== m.n*m.n) throw 0; window.overlay.setMesh(m); statusEl.textContent = 'Alignment imported.'; }
   catch(e){ statusEl.textContent = 'That doesn’t look like alignment text.'; }
+};
+
+/* ---------- Search, pins and location ---------- */
+// MGA zone 55 (GDA2020/GDA94, GRS80): lat/long -> easting/northing (Krüger series, sub-mm accuracy)
+const mgaFwd = (() => {
+  const a=6378137, f=1/298.257222101, n=f/(2-f), A=a/(1+n)*(1+n*n/4+n**4/64), k0=0.9996, e=Math.sqrt(f*(2-f)), R=Math.PI/180;
+  const al=[n/2-2*n*n/3+5*n**3/16, 13*n*n/48-3*n**3/5, 61*n**3/240];
+  return (lat, lon) => {
+    const ph=lat*R, dl=(lon-147)*R, t=Math.sinh(Math.atanh(Math.sin(ph)) - e*Math.atanh(e*Math.sin(ph)));
+    const xp=Math.atan2(t, Math.cos(dl)), ep=Math.atanh(Math.sin(dl)/Math.sqrt(1+t*t));
+    let xi=xp, et=ep;
+    for(let j=1;j<=3;j++){ xi+=al[j-1]*Math.sin(2*j*xp)*Math.cosh(2*j*ep); et+=al[j-1]*Math.cos(2*j*xp)*Math.sinh(2*j*ep); }
+    return [5e5 + k0*A*et, 1e7 + k0*A*xi];
+  };
+})();
+const fmtMGA = (lat, lng) => { const [E,N] = mgaFwd(lat,lng); return `MGA55 E ${Math.round(E)} N ${Math.round(N)}`; };
+
+// "-42.88, 147.33" · "42.88S 147.33E" · "147.33 -42.88" · "525000 5250000" · "55G 525000E 5250000N" -> {lat,lng} or null
+function parseCoords(s){
+  const nums = (s.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+  if(nums.length === 3 && (nums[0] === 54 || nums[0] === 55)) nums.shift();      // MGA zone prefix
+  if(nums.length !== 2) return null;
+  let [a, b] = nums;
+  const ok = (la, lo) => la <= -9 && la >= -45 && lo >= 112 && lo <= 155;
+  if(Math.abs(a) <= 180 && Math.abs(b) <= 180){                                    // degrees
+    if(/s/i.test(s) && a > 0 && b > 0){ if(a < 90 && (b > 90 || a < b)) a = -a; else b = -b; }
+    if(ok(a, b)) return {lat:a, lng:b};
+    if(ok(b, a)) return {lat:b, lng:a};
+    if(ok(-Math.abs(a), b)) return {lat:-Math.abs(a), lng:b};                     // latitude typed without the minus
+    if(ok(-Math.abs(b), a)) return {lat:-Math.abs(b), lng:a};
+    return null;
+  }
+  let E = a, N = b; if(a > 1e6 && b < 1e6){ E = b; N = a; }                        // MGA metres, either order
+  if(E < 1e5 || E > 9e5 || N < 5e6 || N > 1e7) return null;
+  const [la, lo] = mgaInv(E, N); return ok(la, lo) ? {lat:la, lng:lo} : null;
+}
+
+// Fire Danger Rating under a point, read from the overlay's source image (null if it can't be read)
+const FDR = [['No rating',[255,255,255],'#ffffff'],['Moderate',[100,191,48],'#64bf30'],['High',[255,224,51],'#ffe033'],
+             ['Extreme',[245,130,32],'#f58220'],['Catastrophic',[177,26,26],'#b11a1a'],[null,[225,225,225],null]];   // last = sea / outside / boundary line
+const sampleCanvas = document.createElement('canvas'); sampleCanvas.width = sampleCanvas.height = 3;
+function fdrAt(lat, lng){
+  if(!rawImg || !mesh) return null;
+  const p = P([lat,lng]), pts = mesh.nodes.map(P), n = mesh.n;
+  const sw = rawImg.naturalWidth || rawImg.width, sh = rawImg.naturalHeight || rawImg.height;
+  const S = k => [(k % n)/(n-1)*sw, Math.floor(k/n)/(n-1)*sh];
+  for(const t of triangles(mesh)){
+    const [A,B,C] = t.map(k => pts[k]);
+    const den = (B.y-C.y)*(A.x-C.x) + (C.x-B.x)*(A.y-C.y);
+    const w1 = ((B.y-C.y)*(p.x-C.x) + (C.x-B.x)*(p.y-C.y))/den, w2 = ((C.y-A.y)*(p.x-C.x) + (A.x-C.x)*(p.y-C.y))/den, w3 = 1-w1-w2;
+    if(w1 < -1e-9 || w2 < -1e-9 || w3 < -1e-9) continue;
+    const [s0,s1,s2] = t.map(S), x = w1*s0[0]+w2*s1[0]+w3*s2[0], y = w1*s0[1]+w2*s1[1]+w3*s2[1];
+    let d;
+    try { const c = sampleCanvas.getContext('2d', {willReadFrequently:true}); c.clearRect(0,0,3,3);
+          c.drawImage(rawImg, Math.round(x)-1, Math.round(y)-1, 3, 3, 0, 0, 3, 3); d = c.getImageData(0,0,3,3).data; }
+    catch(e){ return null; }                                                       // image from another site without permission
+    const cls = i => { let best = 0, bd = Infinity; FDR.forEach((f, k) => { const dd = (d[i]-f[1][0])**2 + (d[i+1]-f[1][1])**2 + (d[i+2]-f[1][2])**2; if(dd < bd){ bd = dd; best = k; } }); return best; };
+    const centre = cls(16);                                                        // pixel (1,1)
+    if(FDR[centre][0]) return FDR[centre];
+    const counts = {}; for(let i = 0; i < 36; i += 4){ const k = cls(i); if(FDR[k][0]) counts[k] = (counts[k] || 0) + 1; }
+    const k = Object.keys(counts).sort((u, v) => counts[v] - counts[u])[0];
+    return k !== undefined ? FDR[k] : ['Outside forecast area', null, null];
+  }
+  return ['Outside forecast area', null, null];
+}
+const dayLabel = () => { const b = $('days').querySelector('.on'); const t = b ? b.textContent : 'Today';
+  return source === 'archive' && $('date').value ? `${t}, issued ${$('date').value}` : t; };
+
+// Pins (remembered in this browser)
+const PINKEY = 'tfsPins';
+let pins = ls.get(PINKEY) || [];
+const markers = new Map(), pinLayer = L.layerGroup().addTo(map);
+const savePins = () => ls.set(PINKEY, pins);
+const pinIcon = col => L.divIcon({className:'', html:`<div class="pinicon" style="background:${col || '#1a73e8'}"></div>`,
+                                  iconSize:[20,20], iconAnchor:[10,26], popupAnchor:[0,-24]});
+function popupFor(pin){
+  const el = document.createElement('div'); el.className = 'pinpop';
+  const name = document.createElement('input'); name.value = pin.name; name.placeholder = 'Pin name';
+  name.onchange = () => { pin.name = name.value.trim() || 'Pin'; savePins(); listPins(); };
+  const pc = document.createElement('div'); pc.className = 'pc';
+  pc.innerHTML = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}<br>${fmtMGA(pin.lat, pin.lng)}`;
+  const fdr = document.createElement('div'); fdr.className = 'fdr';
+  const r = fdrAt(pin.lat, pin.lng);
+  if(r && r[2]) fdr.innerHTML = `FDR (${dayLabel()}): <b style="background:${r[2]};color:${r[0]==='Catastrophic'?'#fff':'#222'}">${r[0]}</b>`;
+  else if(r) fdr.textContent = `FDR (${dayLabel()}): ${r[0]}`;
+  else fdr.textContent = 'FDR not readable from the live TFS image — switch Source to Archive to read ratings at pins.';
+  const pb = document.createElement('div'); pb.className = 'pb';
+  const copy = document.createElement('button'); copy.textContent = 'Copy';
+  copy.onclick = async () => { const t = `${pin.name}\n${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}\n${fmtMGA(pin.lat, pin.lng)}`;
+    try { await navigator.clipboard.writeText(t); copy.textContent = 'Copied'; } catch(e){ prompt('Copy:', t); } };
+  const gm = document.createElement('a'); gm.textContent = 'Maps'; gm.target = '_blank'; gm.rel = 'noopener';
+  gm.href = `https://www.google.com/maps/search/?api=1&query=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}`;
+  const del = document.createElement('button'); del.textContent = 'Delete';
+  del.onclick = () => removePin(pin.id);
+  pb.append(copy, gm, del); el.append(name, pc, fdr, pb);
+  L.DomEvent.disableClickPropagation(el);
+  return el;
+}
+function drawPin(pin){
+  const r = fdrAt(pin.lat, pin.lng);
+  const m = L.marker([pin.lat, pin.lng], {draggable:true, icon:pinIcon(r && r[2]), title:pin.name, autoPan:true}).addTo(pinLayer);
+  m.bindPopup(() => popupFor(pin), {minWidth:200});
+  m.on('dragend', () => { const l = m.getLatLng(); pin.lat = l.lat; pin.lng = l.lng; savePins(); refreshPins(); m.openPopup(); });
+  markers.set(pin.id, m);
+}
+function addPin(lat, lng, name, open = true){
+  const pin = {id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), name: name || `Pin ${pins.length + 1}`, lat, lng};
+  pins.push(pin); savePins(); drawPin(pin); listPins();
+  if(open) markers.get(pin.id).openPopup();
+  return pin;
+}
+function removePin(id){ pins = pins.filter(p => p.id !== id); savePins(); const m = markers.get(id); if(m){ pinLayer.removeLayer(m); markers.delete(id); } listPins(); }
+function refreshPins(){
+  if(typeof markers === 'undefined') return;
+  for(const pin of pins){ const m = markers.get(pin.id); if(!m) continue;
+    const r = fdrAt(pin.lat, pin.lng); m.setIcon(pinIcon(r && r[2]));
+    if(m.isPopupOpen()) m.setPopupContent(popupFor(pin)); }
+  listPins();
+}
+function listPins(){
+  const el = $('pinlist'); el.innerHTML = '';
+  if(!pins.length){ el.textContent = 'No pins yet — long-press the map or use 📍.'; return; }
+  for(const pin of pins){
+    const r = fdrAt(pin.lat, pin.lng), row = document.createElement('div'), sw = document.createElement('span'), t = document.createElement('span');
+    sw.className = 'sw'; sw.style.background = (r && r[2]) || '#1a73e8';
+    t.textContent = pin.name + (r && r[2] ? ` — ${r[0]}` : '');
+    row.append(sw, t); row.onclick = () => { map.setView([pin.lat, pin.lng], Math.max(map.getZoom(), 11)); markers.get(pin.id).openPopup(); };
+    el.append(row);
+  }
+}
+$('clearpins').onclick = () => { if(!pins.length || !confirm(`Delete all ${pins.length} pins?`)) return; pinLayer.clearLayers(); markers.clear(); pins = []; savePins(); listPins(); };
+pins.forEach(drawPin); listPins();
+
+// Drop pins: 📍 then tap, or long-press / right-click anywhere
+let pinMode = false;
+const setPinMode = on => { pinMode = on; $('pinmode').classList.toggle('on', on); map.getContainer().style.cursor = on ? 'crosshair' : ''; };
+$('pinmode').onclick = () => setPinMode(!pinMode);
+map.on('click', e => { if(pinMode && !aligning){ addPin(e.latlng.lat, e.latlng.lng); setPinMode(false); } });
+map.on('contextmenu', e => { if(!aligning) addPin(e.latlng.lat, e.latlng.lng); });
+
+// Search: coordinates first, otherwise OpenStreetMap place search (biased to Tasmania)
+const results = $('results');
+function showResults(items){ results.innerHTML = '';
+  for(const it of items){ const d = document.createElement('div'); d.textContent = it.label; if(it.go) d.onclick = it.go; else d.className = 'msg'; results.append(d); } }
+async function search(){
+  const s = $('q').value.trim(); results.innerHTML = ''; if(!s) return;
+  const c = parseCoords(s);
+  if(c){ map.setView([c.lat, c.lng], Math.max(map.getZoom(), 12)); addPin(c.lat, c.lng, s); return; }
+  showResults([{label:'Searching…'}]);
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=au&viewbox=143.5,-39.2,148.6,-43.9&q=' + encodeURIComponent(s);
+    const r = await fetch(url, {headers:{'Accept-Language':'en'}}); if(!r.ok) throw new Error(r.status);
+    const hits = await r.json();
+    if(!map._osmAttr){ map.attributionControl.addAttribution('Search © OpenStreetMap'); map._osmAttr = true; }
+    if(!hits.length){ showResults([{label:'No places found. Try adding the town, or enter coordinates.'}]); return; }
+    const pick = h => { results.innerHTML = ''; const lat = +h.lat, lng = +h.lon;
+      map.setView([lat, lng], Math.max(map.getZoom(), 13)); addPin(lat, lng, h.display_name.split(',').slice(0, 2).join(',').trim()); };
+    if(hits.length === 1) return pick(hits[0]);
+    showResults(hits.map(h => ({label: h.display_name, go: () => pick(h)})));
+  } catch(e){ showResults([{label:'Place search is unavailable right now — coordinates still work.'}]); }
+}
+$('go').onclick = search;
+$('q').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('q').blur(); search(); } if(e.key === 'Escape') results.innerHTML = ''; });
+$('q').addEventListener('input', () => { if(!$('q').value) results.innerHTML = ''; });
+[ $('searchbar'), results ].forEach(el => { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); });
+
+// My location
+let locLayer = null;
+$('locate').onclick = () => {
+  if(!navigator.geolocation){ statusEl.textContent = 'Location isn’t available in this browser.'; return; }
+  $('locate').classList.add('on');
+  navigator.geolocation.getCurrentPosition(pos => {
+    $('locate').classList.remove('on');
+    const ll = [pos.coords.latitude, pos.coords.longitude], acc = pos.coords.accuracy;
+    if(locLayer) map.removeLayer(locLayer);
+    locLayer = L.layerGroup([L.circle(ll, {radius:acc, color:'#1a73e8', weight:1, fillOpacity:.1}),
+                             L.circleMarker(ll, {radius:7, color:'#fff', weight:2, fillColor:'#1a73e8', fillOpacity:1})]).addTo(map);
+    map.setView(ll, Math.max(map.getZoom(), 13));
+    const r = fdrAt(ll[0], ll[1]);
+    statusEl.innerHTML = '';
+    statusEl.textContent = `You are here (±${Math.round(acc)} m)` + (r && r[2] ? ` — FDR ${r[0]} (${dayLabel()})` : '') + '. Long-press to pin it.';
+  }, err => { $('locate').classList.remove('on'); statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t get your location</b> (${err.message}).`; },
+     {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
 };
 
 loadDay(0);
