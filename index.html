@@ -382,7 +382,7 @@ function useImage(img, msg){
   try { srcImg = keyed(img); srcBlend = false; } catch(e){ srcImg = img; srcBlend = true; }
   render();
   statusEl.textContent = msg;
-  if (typeof refreshPins === 'function') refreshPins();
+  if (typeof setSampleFor === 'function') setSampleFor(img, !srcBlend);
 }
 function loadDay(d){
   statusEl.textContent = 'Loading…';
@@ -622,9 +622,10 @@ const FDR = [['No rating',[255,255,255],'#ffffff'],['Moderate',[100,191,48],'#64
              ['Extreme',[245,130,32],'#f58220'],['Catastrophic',[177,26,26],'#b11a1a'],[null,[225,225,225],null]];   // last = sea / outside / boundary line
 const sampleCanvas = document.createElement('canvas'); sampleCanvas.width = sampleCanvas.height = 3;
 function fdrAt(lat, lng){
-  if(!rawImg || !mesh) return null;
+  const img = sample && sample.img;
+  if(!img || !mesh) return null;
   const p = P([lat,lng]), pts = mesh.nodes.map(P), n = mesh.n;
-  const sw = rawImg.naturalWidth || rawImg.width, sh = rawImg.naturalHeight || rawImg.height;
+  const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
   const S = k => [(k % n)/(n-1)*sw, Math.floor(k/n)/(n-1)*sh];
   for(const t of triangles(mesh)){
     const [A,B,C] = t.map(k => pts[k]);
@@ -634,7 +635,7 @@ function fdrAt(lat, lng){
     const [s0,s1,s2] = t.map(S), x = w1*s0[0]+w2*s1[0]+w3*s2[0], y = w1*s0[1]+w2*s1[1]+w3*s2[1];
     let d;
     try { const c = sampleCanvas.getContext('2d', {willReadFrequently:true}); c.clearRect(0,0,3,3);
-          c.drawImage(rawImg, Math.round(x)-1, Math.round(y)-1, 3, 3, 0, 0, 3, 3); d = c.getImageData(0,0,3,3).data; }
+          c.drawImage(img, Math.round(x)-1, Math.round(y)-1, 3, 3, 0, 0, 3, 3); d = c.getImageData(0,0,3,3).data; }
     catch(e){ return null; }                                                       // image from another site without permission
     const cls = i => { let best = 0, bd = Infinity; FDR.forEach((f, k) => { const dd = (d[i]-f[1][0])**2 + (d[i+1]-f[1][1])**2 + (d[i+2]-f[1][2])**2; if(dd < bd){ bd = dd; best = k; } }); return best; };
     const centre = cls(16);                                                        // pixel (1,1)
@@ -644,6 +645,33 @@ function fdrAt(lat, lng){
     return k !== undefined ? FDR[k] : ['Outside forecast area', null, null];
   }
   return ['Outside forecast area', null, null];
+}
+// Where ratings are read from: the overlay image if the browser lets us read it, otherwise (Live mode)
+// the archive's newest copy of the same day's map, fetched with the access key.
+let sample = null, borrowing = false, borrowSeq = 0, borrowIdx = {t:0, data:null};
+function setSampleFor(img, readable){
+  borrowSeq++; borrowing = false;
+  sample = readable ? {img, note:''} : null;
+  refreshPins();
+  if(!readable && source === 'live') borrowSample(day);
+}
+async function borrowSample(d){
+  const base = repoBase(); if(!base) return;
+  const seq = ++borrowSeq; borrowing = true; refreshPins();
+  try {
+    if(!borrowIdx.data || Date.now() - borrowIdx.t > 10*60*1000)
+      borrowIdx = {t: Date.now(), data: await (await ghFetch(`${base}/index.json`)).json()};
+    const idx = borrowIdx.data;
+    for(const date of Object.keys(idx).sort().reverse()){
+      const list = idx[date][`Day${d}.png`]; if(!list || !list.length) continue;
+      const file = list[list.length-1], blob = await (await ghFetch(`${base}/${date}/${file}`)).blob();
+      const img = new Image(); img.src = URL.createObjectURL(blob); await img.decode();
+      if(seq !== borrowSeq) return;                                   // day or source changed meanwhile
+      sample = {img, note:`Rating from the archive copy captured ${date} ${file.slice(11,13)}:${file.slice(13,15)}.`};
+      break;
+    }
+  } catch(e){ /* no key, no network or not allowed: pins stay unrated */ }
+  if(seq === borrowSeq){ borrowing = false; refreshPins(); }
 }
 const dayLabel = () => { const b = $('days').querySelector('.on'); const t = b ? b.textContent : 'Today';
   return source === 'archive' && $('date').value ? `${t}, issued ${$('date').value}` : t; };
@@ -665,7 +693,9 @@ function popupFor(pin){
   const r = fdrAt(pin.lat, pin.lng);
   if(r && r[2]) fdr.innerHTML = `FDR (${dayLabel()}): <b style="background:${r[2]};color:${r[0]==='Catastrophic'?'#fff':'#222'}">${r[0]}</b>`;
   else if(r) fdr.textContent = `FDR (${dayLabel()}): ${r[0]}`;
-  else fdr.textContent = 'FDR not readable from the live TFS image — switch Source to Archive to read ratings at pins.';
+  else fdr.textContent = borrowing ? 'Reading the rating…'
+    : 'Rating not available here. In Live mode, enter an archive access key (Source → Archive) and pins will show ratings.';
+  if(r && sample && sample.note){ const n = document.createElement('div'); n.style.cssText = 'color:#666;font-size:11px;margin:-4px 0 8px'; n.textContent = sample.note; el._note = n; }
   const pb = document.createElement('div'); pb.className = 'pb';
   const copy = document.createElement('button'); copy.textContent = 'Copy';
   copy.onclick = async () => { const t = `${pin.name}\n${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}\n${fmtMGA(pin.lat, pin.lng)}`;
@@ -675,6 +705,7 @@ function popupFor(pin){
   const del = document.createElement('button'); del.textContent = 'Delete';
   del.onclick = () => removePin(pin.id);
   pb.append(copy, gm, del); el.append(name, pc, fdr, pb);
+  if(el._note) el.insertBefore(el._note, pb);
   L.DomEvent.disableClickPropagation(el);
   return el;
 }

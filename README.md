@@ -16,7 +16,8 @@ This repository holds only the page — no maps and no keys.
   (`525000 5250000`, `55G 525000E 5250000N`). Coordinates drop a pin straight away.
 - **📍** then tap the map to drop a pin; or **long-press** (phone) / **right-click** (computer).
 - **Pins** show lat/long, MGA55, and the Fire Danger Rating under them for the day shown
-  (ratings can be read in *Archive* mode; the live TFS image can't be read by the page).
+  — at any overlay opacity. In *Live* mode, with an access key entered, ratings come from the
+  archive's newest copy of that day's map (the popup says which copy).
   Pins are coloured by rating, can be dragged, renamed, copied or opened in Google Maps,
   and are remembered in that browser. The panel lists them (tap to zoom).
 - **🎯** shows your location (and its rating).
