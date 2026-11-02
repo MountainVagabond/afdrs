@@ -28,7 +28,14 @@
   .h.big::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;background:#000;border-radius:50%}
   .row button:disabled{opacity:.4}
   #toggle{display:none}
-  @media (max-width:520px){.panel.collapsed > :not(#toggle):not(h1):not(.row):not(#status){display:none}#toggle{display:block}}
+  #status:empty{display:none}
+  @media (max-width:520px){
+    #toggle{display:block;width:100%;padding:5px;font-size:13px;cursor:pointer}
+    .panel.collapsed{padding:6px;width:200px}
+    .panel.collapsed > :not(#toggle):not(#days):not(#status){display:none}
+    .panel.collapsed #days{margin-top:6px}
+    .panel.collapsed #status{margin-top:4px}
+  }
 </style>
 </head>
 <body>
@@ -344,7 +351,7 @@ function useImage(img, msg){
   rawImg = img;
   try { srcImg = keyed(img); srcBlend = false; } catch(e){ srcImg = img; srcBlend = true; }
   render();
-  statusEl.textContent = msg + (srcBlend ? ' Outline unavailable for web images here: use “Load PNG from file” to get it.' : '');
+  statusEl.textContent = msg;
 }
 function loadDay(d){
   statusEl.textContent = 'Loading…';
@@ -490,8 +497,19 @@ $('proj').onchange = e => {
   mesh = meshFromBounds([[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]], mesh.n, proj); commit();
 };
 $('reset').onclick = () => { snapshot(); mesh = meshFromBounds(DEFAULT, mesh.n, proj); commit(); statusEl.textContent = 'Alignment reset (Undo to go back).'; };
-$('toggle').onclick = () => $('panel').classList.toggle('collapsed');
-if (window.innerWidth <= 520) $('panel').classList.add('collapsed');
+const setCollapsed = c => { $('panel').classList.toggle('collapsed', c); $('toggle').textContent = c ? '☰ Controls' : 'Hide controls'; };
+$('toggle').onclick = () => setCollapsed(!$('panel').classList.contains('collapsed'));
+setCollapsed(window.innerWidth <= 520);
+
+// Status line: routine messages fade after a few seconds; errors (shown in bold red) stay put
+{ let t = null;
+  new MutationObserver(() => {
+    clearTimeout(t);
+    const s = statusEl.innerHTML;
+    if (s && !s.includes('<b') && !/^Loading|Reading/.test(statusEl.textContent) && !aligning)
+      t = setTimeout(() => { statusEl.textContent = ''; }, 4000);
+  }).observe(statusEl, {childList: true, characterData: true, subtree: true});
+}
 
 /* ---------- Scripting hooks (for Claude in Chrome or the browser console) ----------
    overlay.moveAll(dLat, dLng)            shift everything (degrees)
