@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Tas Fire Danger Overlay</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  html,body{margin:0;height:100%;font:14px/1.4 system-ui,sans-serif;background:#111}
+  #map{position:absolute;inset:0}
+  .panel{position:absolute;z-index:1000;top:10px;right:10px;background:#fff;color:#222;padding:10px 12px;border-radius:8px;
+         box-shadow:0 2px 10px rgba(0,0,0,.3);width:230px;max-width:calc(100vw - 52px);max-height:calc(100vh - 40px);overflow:auto}
+  .panel h1{font-size:15px;margin:0 0 8px}
+  .panel label{display:block;margin:8px 0 2px;font-weight:600;font-size:12px}
+  .panel select,.panel input[type=range]{width:100%}
+  .days{display:flex;gap:4px}.days button{flex:1;padding:5px 0;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;cursor:pointer;font-size:12px}
+  .days button.on{background:#c8102e;color:#fff;border-color:#c8102e}
+  .legend{margin-top:8px;font-size:12px}.legend div{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .legend span{width:14px;height:14px;border:1px solid #999;display:inline-block}
+  .small{font-size:11px;color:#666;margin-top:6px}
+  .row{display:flex;gap:6px;margin-top:8px}.row button{flex:1;font-size:12px;padding:4px;cursor:pointer}
+  .h{width:12px;height:12px;margin:-8px 0 0 -8px;border:2px solid #fff;box-shadow:0 0 3px #000;box-sizing:content-box}
+  .h.blue{background:#0af;border-radius:50%}
+  .h.orange{background:#f80;border-radius:3px}
+  .h.big{width:28px;height:28px;margin:-17px 0 0 -17px;border-width:3px;opacity:.95}
+  .h.big::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;background:#000;border-radius:50%}
+  .row button:disabled{opacity:.4}
+  #toggle{display:none}
+  @media (max-width:520px){.panel.collapsed > :not(#toggle):not(h1):not(.row):not(#status){display:none}#toggle{display:block}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="panel" id="panel">
+  <h1>TFS Fire Danger Rating</h1>
+  <button id="toggle">Show / hide controls</button>
+  <label>Source</label>
+  <select id="source">
+    <option value="live">Live — fire.tas.gov.au (today)</option>
+    <option value="archive">Archive — past days</option>
+  </select>
+  <div id="archiveBox" style="display:none">
+    <label>Archive address (GitHub user/repo)</label>
+    <input type="text" id="repo" placeholder="e.g. MountainVagabond/tfs-fdr-archive" style="width:100%;box-sizing:border-box;font-size:12px">
+    <label>Access key (GitHub token, for a private archive)</label>
+    <input type="password" id="token" placeholder="github_pat_… — remembered on this device" autocomplete="off" style="width:100%;box-sizing:border-box;font-size:12px">
+    <label>Date issued</label>
+    <select id="date"></select>
+    <label>Issue time</label>
+    <select id="run"></select>
+  </div>
+  <label>Forecast day</label>
+  <div class="days" id="days">
+    <button data-d="0" class="on">Today</button><button data-d="1">Tmrw</button><button data-d="2">Day 2</button><button data-d="3">Day 3</button>
+  </div>
+  <label>Overlay opacity <span id="opv">70%</span></label>
+  <input type="range" id="op" min="0" max="100" value="70">
+  <label>Basemap</label>
+  <select id="base">
+    <option value="satlab">Satellite + place names (Esri)</option>
+    <option value="street">Streets (Esri)</option>
+    <option value="carto">Streets (CARTO)</option>
+    <option value="light">Light (CARTO)</option>
+    <option value="topo">Topographic (Esri)</option>
+    <option value="sat">Esri satellite</option>
+  </select>
+  <label>FDR coastline outline</label>
+  <select id="outline">
+    <option value="magenta">Magenta</option>
+    <option value="cyan">Cyan</option>
+    <option value="yellow">Yellow</option>
+    <option value="red">Red</option>
+    <option value="off">Off</option>
+  </select>
+  <div class="legend">
+    <div><span style="background:#fff"></span>No rating</div>
+    <div><span style="background:#64bf30"></span>Moderate</div>
+    <div><span style="background:#ffe033"></span>High</div>
+    <div><span style="background:#f58220"></span>Extreme</div>
+    <div><span style="background:#b11a1a"></span>Catastrophic</div>
+  </div>
+  <label>Image projection</label>
+  <select id="proj">
+    <option value="tm">MGA zone 55 (fitted, best)</option>
+    <option value="latlon">Lat/long grid (reprojected)</option>
+    <option value="merc">As-is (no reprojection)</option>
+  </select>
+  <label>Control grid</label>
+  <select id="grid">
+    <option value="4">4 × 4 points (coarse)</option>
+    <option value="6">6 × 6</option>
+    <option value="8">8 × 8</option>
+    <option value="12">12 × 12</option>
+    <option value="16">16 × 16 (fine)</option>
+  </select>
+  <div class="row">
+    <button id="align">Align overlay</button>
+    <button id="undo">Undo</button>
+    <button id="reset">Reset</button>
+  </div>
+  <div class="row">
+    <button id="exp">Copy alignment</button>
+    <button id="imp">Paste alignment</button>
+  </div>
+  <label>Load PNG from file</label>
+  <input type="file" id="file" accept="image/png,image/*" style="width:100%;font-size:12px">
+  <div class="small" id="status">Loading overlay…</div>
+  <div class="small">Images: fire.tas.gov.au (refreshed morning and ~4:30pm). Not for safety decisions — check TFS directly.</div>
+</div>
+
+<script>
+const LIVE = d => `https://www.fire.tas.gov.au/AFDRS/IDZ10136_AUS_AFDRS_max_fdr_SFC_Tas_Only_Day${d}.png?t=${new Date().toISOString().slice(0,13)}`;
+
+const DEFAULT = [[-43.85, 143.30], [-39.35, 148.64]];
+const OLD_KEY = 'tfsOverlayBounds', PKEY = 'tfsOverlayProj3', MKEY = 'tfsMesh3';
+const ls = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+const $ = id => document.getElementById(id);
+const statusEl = $('status');
+
+/* ---------- Archive (GitHub repository filled by tfs_fdr_archive.py) ---------- */
+const RKEY = 'tfsArchiveRepo', TKEY = 'tfsArchiveToken';
+let source = 'live', index = null;          // index: {date: {"Day0.png": [filenames...], ...}}
+const repoName = () => ($('repo').value || '').trim().replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,'');
+const repoBase = () => repoName() ? `https://api.github.com/repos/${repoName()}/contents/fdr_archive` : null;
+// Read a file from the archive through GitHub's API (works for public repos, and private ones with a token)
+async function ghFetch(url){
+  const tok = ($('token').value || '').trim(), h = {Accept: 'application/vnd.github.raw+json'};
+  if(tok) h.Authorization = 'Bearer ' + tok;
+  const r = await fetch(url, {headers: h, cache: 'no-store'});
+  if(!r.ok) throw new Error(r.status);
+  return r;
+}
+const archiveError = code => code == 401 ? 'The access key was rejected — check it, or that it hasn’t expired.'
+  : code == 404 ? 'Archive not found — check the user/repo address, and if the archive is private, that the access key is entered and allowed to read it.'
+  : code == 403 ? 'GitHub refused the request (too many requests without a key, or the key lacks access).'
+  : 'Couldn’t reach GitHub.';
+function archiveFile(d){
+  // newest file for Day d whose issue stamp is not after the chosen issue time (unchanged images aren't re-saved)
+  const date = $('date').value, run = $('run').value, list = index && index[date] && index[date][`Day${d}.png`] || [];
+  const ok = list.filter(f => f.slice(0,15) <= run);
+  return ok.length ? ok[ok.length-1] : null;
+}
+const SRC = d => {
+  if(source === 'live') return LIVE(d);
+  const f = archiveFile(d); return f ? `${repoBase()}/${$('date').value}/${f}` : null;
+};
+async function loadIndex(){
+  const base = repoBase(); if(!base){ statusEl.textContent = 'Enter the archive address (GitHub user/repo).'; return; }
+  statusEl.textContent = 'Reading archive index…';
+  try {
+    index = await (await ghFetch(`${base}/index.json`)).json();
+  } catch(e){ statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t read the archive.</b> ${archiveError(e.message)}`; index = null; return; }
+  ls.set(RKEY, $('repo').value.trim()); ls.set(TKEY, $('token').value.trim());
+  const dates = Object.keys(index).sort().reverse();
+  $('date').innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+  fillRuns(); loadDay(day);
+}
+function fillRuns(){
+  const date = $('date').value, files = index && index[date] || {};
+  const stamps = [...new Set(Object.values(files).flat().map(f => f.slice(0,15)))].sort();
+  $('run').innerHTML = stamps.map(s => `<option value="${s}">${s.slice(11,13)}:${s.slice(13,15)}</option>`).join('');
+  $('run').value = stamps[stamps.length-1] || '';
+}
+$('source').onchange = e => {
+  source = e.target.value; $('archiveBox').style.display = source === 'archive' ? '' : 'none';
+  if(source === 'archive'){ if(index) loadDay(day); else loadIndex(); } else loadDay(day);
+};
+$('repo').value = ls.get(RKEY) || 'MountainVagabond/tfs-fdr-archive';
+$('token').value = ls.get(TKEY) || '';
+$('repo').onchange = loadIndex;
+$('token').onchange = loadIndex;
+$('date').onchange = () => { fillRuns(); loadDay(day); };
+$('run').onchange = () => loadDay(day);
+
+const map = L.map('map', {zoomControl:true}).setView([-41.9, 146.6], 7);
+const bases = {
+  // CARTO / Esri tiles work from a local file; OpenStreetMap's own servers block pages opened from disk
+  satlab: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'}),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19})
+  ]),
+  street: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'}),
+  carto: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'© OpenStreetMap contributors © CARTO'}),
+  light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'© OpenStreetMap contributors © CARTO'}),
+  topo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'}),
+  sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'})
+};
+let base = bases.satlab.addTo(map);
+$('base').onchange = e => { map.removeLayer(base); base = bases[e.target.value].addTo(map); };
+
+// ImageOverlay that shows a <canvas>
+const CanvasOverlay = L.ImageOverlay.extend({
+  _initImage(){
+    const c = this._image = this._url;
+    L.DomUtil.addClass(c, 'leaflet-image-layer');
+    if (this._zoomAnimated) L.DomUtil.addClass(c, 'leaflet-zoom-animated');
+    c.onselectstart = L.Util.falseFn; c.onmousemove = L.Util.falseFn;
+    this._updateOpacity();
+  }
+});
+
+/* ---------- Mesh: an n×n grid of control points pinned to the image ---------- */
+const CRS = L.CRS.EPSG3857;
+const P = ll => CRS.project(L.latLng(ll[0], ll[1]));          // [lat,lng] -> metres
+const U = p => { const l = CRS.unproject(p); return [l.lat, l.lng]; };
+const mercLat = (N, S, t) => { const m = l => Math.log(Math.tan(Math.PI/4 + l*Math.PI/360)); const y = m(N) + (m(S)-m(N))*t; return (2*Math.atan(Math.exp(y)) - Math.PI/2)*180/Math.PI; };
+
+let proj = ls.get(PKEY) || 'tm';
+$('proj').value = proj;
+let mesh = ls.get(MKEY);   // {n, nodes:[[lat,lng]...]} row-major, row 0 = top of image
+
+// Fitted against Esri's detailed coastline: the TFS PNG is a GDA94/2020 MGA zone 55 grid (ellipsoidal Transverse
+// Mercator, 147°E, k0 0.9996) with square ~161 m pixels. Image edges in MGA metres, plus small local corrections.
+const TMFIT = {E0:221912.1, E1:630057.3, N0:5619564.3, N1:5159273.7, W:2535, H:2857,
+  // [u px, v px, east corr m, north corr m] — smooth local tweaks measured region by region
+  c:[[317,348,200,-600],[2218,348,-200,-400],[317,1044,0,-800],[951,1044,400,400],[1584,1044,0,200],[2218,1044,-50,250],
+     [951,1741,150,-200],[1584,1741,50,-100],[2218,1741,100,0],[951,2437,-50,0],[1584,2437,300,-50],[2218,2437,0,0]]};
+const mgaInv = (() => {
+  const a=6378137, f=1/298.257222101, n=f/(2-f), A=a/(1+n)*(1+n*n/4+n**4/64), k0=0.9996, R=Math.PI/180;
+  const be=[n/2-2*n*n/3+37*n**3/96, n*n/48+n**3/15, 17*n**3/480], de=[2*n-2*n*n/3-2*n**3, 7*n*n/3-8*n**3/5, 56*n**3/15];
+  return (E, N) => {
+    const xi=(N-1e7)/(k0*A), et=(E-5e5)/(k0*A); let xp=xi, ep=et;
+    for(let j=1;j<=3;j++){ xp-=be[j-1]*Math.sin(2*j*xi)*Math.cosh(2*j*et); ep-=be[j-1]*Math.cos(2*j*xi)*Math.sinh(2*j*et); }
+    const chi=Math.asin(Math.sin(xp)/Math.cosh(ep)); let p=chi;
+    for(let j=1;j<=3;j++) p+=de[j-1]*Math.sin(2*j*chi);
+    return [p/R, 147+Math.atan(Math.sinh(ep)/Math.cos(xp))/R];
+  };
+})();
+function meshTM(n){
+  const T = TMFIT, nodes = [];
+  const corr = (u,v) => { let s=0,e=0,m=0; for(const c of T.c){ const w=1/((u-c[0])**2+(v-c[1])**2+1e4); s+=w; e+=w*c[2]; m+=w*c[3]; } return [e/s, m/s]; };
+  for(let j=0;j<n;j++) for(let i=0;i<n;i++){
+    const u=i/(n-1)*T.W, v=j/(n-1)*T.H, d=corr(u, Math.min(v,2785));
+    nodes.push(mgaInv(T.E0+(T.E1-T.E0)*u/T.W+d[0], T.N0-(T.N0-T.N1)*v/T.H+d[1]));
+  }
+  return {n, nodes};
+}
+function meshFromBounds(b, n, pr){
+  if(pr === 'tm') return meshTM(n);
+  const [[S,W],[N,E]] = b, nodes = [];
+  for(let j=0;j<n;j++) for(let i=0;i<n;i++){
+    const t = j/(n-1);
+    nodes.push([pr === 'latlon' ? N - (N-S)*t : mercLat(N,S,t), W + (E-W)*i/(n-1)]);
+  }
+  return {n, nodes};
+}
+if(!mesh || !mesh.nodes) mesh = meshFromBounds(DEFAULT, 16, proj);
+$('grid').value = String(mesh.n);
+const saveMesh = () => ls.set(MKEY, mesh);
+
+// Where image point (u,v in 0..1) lands, in projected metres (same triangles as the renderer)
+function warpAt(m, u, v){
+  const n = m.n, gx = Math.min(u*(n-1), n-1-1e-9), gy = Math.min(v*(n-1), n-1-1e-9);
+  const i = Math.floor(gx), j = Math.floor(gy), fx = gx-i, fy = gy-j;
+  const q = (a,b) => P(m.nodes[(j+b)*n + i+a]);
+  const p00=q(0,0), p10=q(1,0), p01=q(0,1), p11=q(1,1);
+  return fy <= fx
+    ? L.point(p00.x + fx*(p10.x-p00.x) + fy*(p11.x-p10.x), p00.y + fx*(p10.y-p00.y) + fy*(p11.y-p10.y))
+    : L.point(p00.x + fy*(p01.x-p00.x) + fx*(p11.x-p01.x), p00.y + fy*(p01.y-p00.y) + fx*(p11.y-p01.y));
+}
+function resample(n){
+  const nodes = [];
+  for(let j=0;j<n;j++) for(let i=0;i<n;i++) nodes.push(U(warpAt(mesh, i/(n-1), j/(n-1))));
+  mesh = {n, nodes};
+}
+function triangles(m){
+  const n = m.n, t = [];
+  for(let j=0;j<n-1;j++) for(let i=0;i<n-1;i++){
+    const a=j*n+i, b=a+1, c=a+n, d=c+1;
+    t.push([a,b,d],[a,d,c]);
+  }
+  return t;
+}
+
+/* ---------- Rendering ---------- */
+let box = null, imgLayer = null, srcImg = null, srcBlend = false, opacity = .7, day = 0;
+function render(){
+  if(!srcImg) return;
+  const sw = srcImg.naturalWidth || srcImg.width, sh = srcImg.naturalHeight || srcImg.height, n = mesh.n;
+  const pts = mesh.nodes.map(P);
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  pts.forEach(p=>{minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);});
+  const scale = Math.min(3000/(maxX-minX), 3000/(maxY-minY), sw*1.1/(maxX-minX));
+  const out = document.createElement('canvas');
+  out.width = Math.ceil((maxX-minX)*scale); out.height = Math.ceil((maxY-minY)*scale);
+  const x = out.getContext('2d');
+  const D = pts.map(p => [(p.x-minX)*scale, (maxY-p.y)*scale]);                 // canvas y down = north up
+  const S = mesh.nodes.map((_,k) => [(k % n)/(n-1)*sw, Math.floor(k/n)/(n-1)*sh]);
+  for(const [a,b,c] of triangles(mesh)){
+    const [x0,y0]=S[a],[x1,y1]=S[b],[x2,y2]=S[c],[u0,v0]=D[a],[u1,v1]=D[b],[u2,v2]=D[c];
+    const den = (x1-x0)*(y2-y0) - (x2-x0)*(y1-y0); if(!den) continue;
+    const A = ((u1-u0)*(y2-y0) - (u2-u0)*(y1-y0))/den, C = ((u2-u0)*(x1-x0) - (u1-u0)*(x2-x0))/den;
+    const B = ((v1-v0)*(y2-y0) - (v2-v0)*(y1-y0))/den, Dd = ((v2-v0)*(x1-x0) - (v1-v0)*(x2-x0))/den;
+    const cx=(u0+u1+u2)/3, cy=(v0+v1+v2)/3, grow = p => { const dx=p[0]-cx, dy=p[1]-cy, l=Math.hypot(dx,dy)||1; return [p[0]+dx/l*.8, p[1]+dy/l*.8]; };
+    const t = [grow([u0,v0]),grow([u1,v1]),grow([u2,v2])];
+    x.save(); x.beginPath(); x.moveTo(...t[0]); x.lineTo(...t[1]); x.lineTo(...t[2]); x.closePath(); x.clip();
+    x.setTransform(A, B, C, Dd, u0 - A*x0 - C*y0, v0 - B*x0 - Dd*y0);
+    x.drawImage(srcImg, 0, 0);
+    x.restore();
+  }
+  box = {minX,minY,maxX,maxY};
+  const bounds = L.latLngBounds(U(L.point(minX,minY)), U(L.point(maxX,maxY)));
+  if(imgLayer) map.removeLayer(imgLayer);
+  imgLayer = new CanvasOverlay(out, bounds, {opacity, interactive:false}).addTo(map);
+  map.getPane('overlayPane').style.mixBlendMode = srcBlend ? 'multiply' : '';
+}
+
+const OUTLINE = {magenta:[255,0,255], cyan:[0,255,255], yellow:[255,255,0], red:[255,0,0]};
+let rawImg = null;
+function keyed(img){
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.drawImage(img,0,0);
+  const id = x.getImageData(0,0,W,H), p = id.data;   // throws if cross-origin
+  // sea = flat mid-grey (≈225); land = white "no rating" or a rating colour
+  const sea = new Uint8Array(W*H);
+  for(let k=0;k<W*H;k++){ const r=p[k*4],g=p[k*4+1],b=p[k*4+2]; sea[k] = (Math.abs(r-g)<8 && Math.abs(g-b)<8 && r>150 && r<240) ? 1 : 0; }
+  for(let k=0;k<W*H;k++){
+    const i=k*4, r=p[i],g=p[i+1],b=p[i+2];
+    if(Math.abs(r-g)<12 && Math.abs(g-b)<12 && Math.abs(r-b)<12) p[i+3] = r>200 ? 0 : 120;
+  }
+  const col = OUTLINE[$('outline').value];
+  if(col){
+    // land pixels touching sea (2 px thick) get the outline colour
+    for(let y=0;y<H;y++) for(let X=0;X<W;X++){
+      const k=y*W+X; if(sea[k]) continue;
+      let edge=false;
+      for(let dy=-2;dy<=2 && !edge;dy++) for(let dx=-2;dx<=2;dx++){
+        const yy=y+dy, xx=X+dx; if(yy<0||yy>=H||xx<0||xx>=W) continue;
+        if(sea[yy*W+xx]){ edge=true; break; }
+      }
+      if(edge){ const i=k*4; p[i]=col[0]; p[i+1]=col[1]; p[i+2]=col[2]; p[i+3]=255; }
+    }
+  }
+  x.putImageData(id,0,0); return c;
+}
+function useImage(img, msg){
+  rawImg = img;
+  try { srcImg = keyed(img); srcBlend = false; } catch(e){ srcImg = img; srcBlend = true; }
+  render();
+  statusEl.textContent = msg + (srcBlend ? ' Outline unavailable for web images here: use “Load PNG from file” to get it.' : '');
+}
+function loadDay(d){
+  statusEl.textContent = 'Loading…';
+  const url = SRC(d), img = new Image();
+  if(!url){ statusEl.textContent = source === 'archive' && index ? `No Day ${d} image archived for ${$('date').value}.` : 'Enter the archive address (GitHub user/repo).'; return; }
+  const label = source === 'archive' ? `Archive: issued ${$('date').value} ${$('run').options[$('run').selectedIndex]?.text || ''}, Day ${d}.` : 'Live overlay loaded.';
+  if(source === 'archive'){
+    // fetched as a blob, so the image counts as same-origin and the coastline outline works
+    ghFetch(url).then(r => r.blob()).then(b => {
+      img.onload = () => { useImage(img, label); URL.revokeObjectURL(img.src); };
+      img.onerror = () => { statusEl.innerHTML = '<b style="color:#c8102e">That archive file isn’t a readable image.</b>'; };
+      img.src = URL.createObjectURL(b);
+    }).catch(e => { statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t load that image from the archive.</b> ${archiveError(e.message)}`; });
+    return;
+  }
+  img.crossOrigin = 'anonymous';
+  img.onload = () => useImage(img, label);
+  img.onerror = () => {
+    const plain = new Image();
+    plain.onload = () => useImage(plain, 'Overlay loaded.');
+    plain.onerror = () => { statusEl.innerHTML = '<b style="color:#c8102e">Couldn’t load the map image from the TFS website.</b> Use “Load PNG from file” instead.'; };
+    plain.src = url.replace(/\?.*/,'') + '?t=' + Date.now();
+  };
+  img.src = url;
+}
+function loadLocal(file){
+  if(!file) return;
+  const img = new Image();
+  img.onload = () => useImage(img, 'Loaded ' + file.name + '.');
+  img.onerror = () => { statusEl.textContent = 'That file isn’t a readable image.'; };
+  img.src = URL.createObjectURL(file);
+}
+$('outline').onchange = () => { if(rawImg){ try{ srcImg = keyed(rawImg); srcBlend = false; render(); }catch(e){} } };
+$('file').onchange = e => loadLocal(e.target.files[0]);
+$('map').addEventListener('dragover', e => e.preventDefault());
+$('map').addEventListener('drop', e => { e.preventDefault(); loadLocal(e.dataTransfer.files[0]); });
+
+$('days').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('on', x===b));
+  day = +b.dataset.d; loadDay(day);
+};
+$('op').oninput = () => { opacity = $('op').value/100; $('opv').textContent = $('op').value+'%'; imgLayer && imgLayer.setOpacity(opacity); };
+
+/* ---------- Alignment handles ---------- */
+let aligning = false, layer = L.layerGroup(), undo = [];
+const icon = cls => L.divIcon({className:'h ' + cls, iconSize:null});
+const snapshot = () => { undo.push(JSON.stringify(mesh)); if(undo.length > 50) undo.shift(); };
+function commit(){ saveMesh(); render(); drawHandles(); }
+
+// Move everything by a projected-metre delta
+function translateAll(from, d){
+  if(imgLayer && box) imgLayer.setBounds(L.latLngBounds(U(L.point(box.minX+d.x, box.minY+d.y)), U(L.point(box.maxX+d.x, box.maxY+d.y)))); mesh.nodes = from.map(ll => { const p = P(ll); return U(L.point(p.x+d.x, p.y+d.y)); }); }
+
+function wireframe(){
+  const n = mesh.n, lines = [];
+  for(let j=0;j<n;j++) lines.push(mesh.nodes.slice(j*n, j*n+n));
+  for(let i=0;i<n;i++){ const c=[]; for(let j=0;j<n;j++) c.push(mesh.nodes[j*n+i]); lines.push(c); }
+  return lines;
+}
+let wire = null;
+const updateWire = () => wire && wire.setLatLngs(wireframe());
+
+function drawHandles(){
+  layer.clearLayers(); if(!aligning) return;
+  const n = mesh.n;
+  wire = L.polyline(wireframe(), {color:'#0af', weight:1, opacity:.6, interactive:false}).addTo(layer);
+  // Blue: each mesh node — drag to bend the image locally
+  mesh.nodes.forEach((ll, k) => {
+    const m = L.marker(ll, {draggable:true, icon:icon('blue')}).addTo(layer);
+    m.on('dragstart', snapshot);
+    m.on('drag', () => { const p = m.getLatLng(); mesh.nodes[k] = [p.lat, p.lng]; updateWire(); });
+    m.on('dragend', commit);
+  });
+  // Orange: centre of every cell — drag to move the whole overlay
+  for(let j=0;j<n-1;j++) for(let i=0;i<n-1;i++){
+    const c = U(warpAt(mesh, (i+.5)/(n-1), (j+.5)/(n-1)));
+    const m = L.marker(c, {draggable:true, icon:icon('orange')}).addTo(layer);
+    let from, p0;
+    m.on('dragstart', () => { snapshot(); from = mesh.nodes.slice(); p0 = P(c); });
+    m.on('drag', () => { const p = P([m.getLatLng().lat, m.getLatLng().lng]); translateAll(from, L.point(p.x-p0.x, p.y-p0.y)); updateWire(); });
+    m.on('dragend', commit);
+  }
+  placeFloating();
+}
+
+// Floating handles that always sit in the middle of the screen
+const fMove = L.marker([0,0], {draggable:true, icon:icon('orange big'), zIndexOffset:1000});
+const fWarp = L.marker([0,0], {draggable:true, icon:icon('blue big'), zIndexOffset:1000});
+let dragging = false;
+function placeFloating(){
+  if(!aligning || dragging) return;
+  const c = map.getCenter(), pc = map.latLngToContainerPoint(c);
+  fMove.setLatLng(map.containerPointToLatLng(pc.add([-30,0]))).addTo(map);
+  fWarp.setLatLng(map.containerPointToLatLng(pc.add([30,0]))).addTo(map);
+}
+map.on('moveend', placeFloating);
+{ let from, p0;
+  fMove.on('dragstart', () => { dragging = true; snapshot(); from = mesh.nodes.slice(); const l = fMove.getLatLng(); p0 = P([l.lat,l.lng]); });
+  fMove.on('drag', () => { const l = fMove.getLatLng(), p = P([l.lat,l.lng]); translateAll(from, L.point(p.x-p0.x, p.y-p0.y)); updateWire(); });
+  fMove.on('dragend', () => { dragging = false; commit(); });
+}
+// Blue floating: bends the image right here — moves the 3 surrounding mesh points just enough
+{ let from, p0, tri = null;
+  function findTri(p){
+    const pts = mesh.nodes.map(P);
+    for(const t of triangles(mesh)){
+      const [a,b,c] = t.map(k=>pts[k]);
+      const den = (b.y-c.y)*(a.x-c.x) + (c.x-b.x)*(a.y-c.y);
+      const w1 = ((b.y-c.y)*(p.x-c.x) + (c.x-b.x)*(p.y-c.y))/den, w2 = ((c.y-a.y)*(p.x-c.x) + (a.x-c.x)*(p.y-c.y))/den, w3 = 1-w1-w2;
+      if(w1>=-1e-9 && w2>=-1e-9 && w3>=-1e-9) return {k:t, w:[w1,w2,w3]};
+    }
+    return null;
+  }
+  fWarp.on('dragstart', () => {
+    dragging = true; const l = fWarp.getLatLng(); p0 = P([l.lat,l.lng]); tri = findTri(p0);
+    if(!tri){ statusEl.textContent = 'Blue handle is outside the overlay — move it over the image.'; return; }
+    snapshot(); from = mesh.nodes.slice();
+  });
+  fWarp.on('drag', () => {
+    if(!tri) return;
+    const l = fWarp.getLatLng(), p = P([l.lat,l.lng]), dx = p.x-p0.x, dy = p.y-p0.y;
+    const ss = tri.w.reduce((s,w)=>s+w*w, 0);
+    mesh.nodes = from.slice();
+    tri.k.forEach((k, idx) => { const q = P(from[k]), f = tri.w[idx]/ss; mesh.nodes[k] = U(L.point(q.x + dx*f, q.y + dy*f)); });
+    updateWire();
+  });
+  fWarp.on('dragend', () => { dragging = false; if(tri) commit(); else placeFloating(); });
+}
+
+function setAligning(on){
+  aligning = on;
+  $('align').textContent = on ? 'Done aligning' : 'Align overlay';
+  if(on){ layer.addTo(map); drawHandles(); statusEl.textContent = 'Orange = move all · Blue = bend here. Big pair follows the screen centre.'; }
+  else { layer.remove(); fMove.remove(); fWarp.remove(); saveMesh(); statusEl.textContent = 'Alignment saved.'; }
+}
+$('align').onclick = () => setAligning(!aligning);
+$('undo').onclick = () => { if(!undo.length) return; mesh = JSON.parse(undo.pop()); $('grid').value = String(mesh.n); commit(); };
+$('grid').onchange = e => { snapshot(); resample(+e.target.value); commit(); };
+$('proj').onchange = e => {
+  snapshot(); proj = e.target.value; ls.set(PKEY, proj);
+  const b = L.latLngBounds(mesh.nodes);    // rebuild from the current outer extent
+  mesh = meshFromBounds([[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]], mesh.n, proj); commit();
+};
+$('reset').onclick = () => { snapshot(); mesh = meshFromBounds(DEFAULT, mesh.n, proj); commit(); statusEl.textContent = 'Alignment reset (Undo to go back).'; };
+$('toggle').onclick = () => $('panel').classList.toggle('collapsed');
+if (window.innerWidth <= 520) $('panel').classList.add('collapsed');
+
+/* ---------- Scripting hooks (for Claude in Chrome or the browser console) ----------
+   overlay.moveAll(dLat, dLng)            shift everything (degrees)
+   overlay.bendAt(lat, lng, dLat, dLng)   move the image point at lat,lng by dLat,dLng; nearby only
+   overlay.getMesh() / overlay.setMesh(m) read / replace all control points
+   overlay.undo()                          step back                                         */
+function bendAt(lat, lng, dLat, dLng){
+  const p0 = P([lat,lng]), p1 = P([lat+dLat, lng+dLng]), dx = p1.x-p0.x, dy = p1.y-p0.y;
+  const pts = mesh.nodes.map(P);
+  for(const t of triangles(mesh)){
+    const [a,b,c] = t.map(k=>pts[k]);
+    const den = (b.y-c.y)*(a.x-c.x) + (c.x-b.x)*(a.y-c.y);
+    const w1 = ((b.y-c.y)*(p0.x-c.x) + (c.x-b.x)*(p0.y-c.y))/den, w2 = ((c.y-a.y)*(p0.x-c.x) + (a.x-c.x)*(p0.y-c.y))/den, w3 = 1-w1-w2;
+    if(w1>=-1e-9 && w2>=-1e-9 && w3>=-1e-9){
+      const w = [w1,w2,w3], ss = w1*w1+w2*w2+w3*w3;
+      snapshot();
+      t.forEach((k,i) => { const q = pts[k]; mesh.nodes[k] = U(L.point(q.x + dx*w[i]/ss, q.y + dy*w[i]/ss)); });
+      commit(); return true;
+    }
+  }
+  return false;   // point not on the overlay
+}
+window.overlay = {
+  moveAll(dLat, dLng){ snapshot(); mesh.nodes = mesh.nodes.map(([a,b]) => [a+dLat, b+dLng]); commit(); },
+  bendAt,
+  getMesh: () => JSON.parse(JSON.stringify(mesh)),
+  setMesh(m){ snapshot(); mesh = m; $('grid').value = String(m.n); commit(); },
+  undo: () => $('undo').click()
+};
+// Copy / paste alignment between devices
+$('exp').onclick = async () => {
+  const t = JSON.stringify(mesh);
+  try { await navigator.clipboard.writeText(t); statusEl.textContent = 'Alignment copied to clipboard.'; }
+  catch(e){ prompt('Copy this alignment text:', t); }
+};
+$('imp').onclick = () => {
+  const t = prompt('Paste alignment text:'); if(!t) return;
+  try { const m = JSON.parse(t); if(!m.n || !m.nodes || m.nodes.length !== m.n*m.n) throw 0; window.overlay.setMesh(m); statusEl.textContent = 'Alignment imported.'; }
+  catch(e){ statusEl.textContent = 'That doesn’t look like alignment text.'; }
+};
+
+loadDay(0);
+</script>
+</body>
+</html>
