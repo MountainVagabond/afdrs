@@ -135,6 +135,14 @@
   #gatemsg{min-height:1.4em;margin-top:8px;font-size:13px;color:#c8102e}
   #gate .fine{font-size:11px;color:#666;margin-top:12px}
   .panel .unoff{display:block;font-size:11px;font-weight:400;color:#666}
+  /* Disclaimer: shown once per device after unlocking, and again whenever DISC_VER changes */
+  #disc{position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+  #disc[hidden]{display:none}
+  #disc .card{background:#fff;color:#222;border-radius:10px;padding:20px;width:100%;max-width:420px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 4px 20px rgba(0,0,0,.5);font-size:14px;line-height:1.45}
+  #disc h2{font-size:18px;margin:0 0 10px}
+  #disc p{margin:0 0 10px}
+  #disc button{width:100%;margin-top:6px;font-size:16px;padding:10px 14px;border:1px solid #c8102e;background:#c8102e;color:#fff;border-radius:6px;cursor:pointer;font-weight:600}
+  #discbtn{font-size:11px;padding:2px 8px;margin-top:6px;cursor:pointer}
 </style>
 </head>
 <body class="locked">
@@ -144,7 +152,17 @@
     <p>Private tool. Enter your access key to open it.</p>
     <div class="in"><input id="gatekey" type="password" autocomplete="off" placeholder="Access key" aria-label="Access key"><button type="button" id="gatego">Open</button></div>
     <div id="gatemsg" aria-live="polite"></div>
-    <div class="fine">The key is saved on this device only. Unofficial personal tool, not affiliated with or endorsed by any fire agency or the Bureau of Meteorology.</div>
+    <div class="fine">The key is saved on this device only. Unofficial personal tool. Not affiliated with, authorised or endorsed by any government agency, fire service, the Bureau of Meteorology, or any other organisation.</div>
+  </div>
+</div>
+<div id="disc" role="dialog" aria-modal="true" aria-labelledby="disch" hidden>
+  <div class="card">
+    <h2 id="disch">Before you use this</h2>
+    <p><b>Unofficial.</b> Not affiliated with, authorised or endorsed by any government agency, fire service, the Bureau of Meteorology, or any other organisation.</p>
+    <p>Shared by invitation only, with people already well informed about bushfire risk, and used at your own risk. Apply your own judgement, knowledge and experience when viewing it.</p>
+    <p><b>Use it alongside official forecasts and warnings, not instead of them.</b></p>
+    <p>All care has been taken in building this tool, but its accuracy and currency are not guaranteed, and there are known lags while information from official sources updates.</p>
+    <button type="button" id="discok">I understand</button>
   </div>
 </div>
 <div id="map"></div>
@@ -240,6 +258,7 @@
   <input type="file" id="file" accept="image/png,image/*" style="width:100%;font-size:12px">
   <div class="small" id="status">Loading overlay…</div>
   <div class="small">Images: fire.tas.gov.au (refreshed morning and ~4:30pm). Not for safety decisions — check TFS directly.</div>
+  <button type="button" id="discbtn">ⓘ About / disclaimer</button>
 </div>
 
 <script>
@@ -346,6 +365,13 @@ $('gatekey').onkeydown = e => { if(e.key === 'Enter') gateOpen(); };
   if(!k) gateShow();
   else { document.body.classList.remove('locked');
          gateCheck(k).then(r => { if(r === 'bad') gateShow('The key saved on this device was rejected; it may have expired. Paste a current key.'); }); } }
+/* ---------- Disclaimer ----------
+   Shown after unlocking until accepted on this device. Bump DISC_VER when the wording changes so everyone sees it again. */
+const DISC_VER = '2026-11-04', DKEY = 'afdrsDisclaimer';
+const discShow = () => { $('disc').hidden = false; setTimeout(() => $('discok').focus(), 0); };
+$('discok').onclick = () => { ls.set(DKEY, DISC_VER); $('disc').hidden = true; };
+$('discbtn').onclick = discShow;
+if(!document.body.classList.contains('locked') && ls.get(DKEY) !== DISC_VER) discShow();
 $('repo').onchange = loadIndex;
 $('token').onchange = () => { $('token').value = cleanKey($('token').value); loadIndex(); };
 $('date').onchange = () => { fillRuns(); loadDay(day); };
