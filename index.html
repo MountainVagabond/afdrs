@@ -57,6 +57,29 @@
   .pinpop .pb{display:flex;gap:4px}.pinpop .pb button,.pinpop .pb a{flex:1;font-size:12px;padding:4px;text-align:center;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;color:#222;text-decoration:none;cursor:pointer}
   #pinlist div{display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px}
   #pinlist span.sw{width:10px;height:10px;border-radius:50%;border:1px solid #333;flex:none}
+  /* ---- fire weather forecast sheet ---- */
+  #fcsheet{position:absolute;z-index:1002;left:10px;bottom:72px;width:min(560px,calc(100vw - 20px));box-sizing:border-box;max-height:min(70vh,640px);
+           overflow:auto;background:#fff;color:#222;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.4);font-size:12px}
+  #fcsheet[hidden]{display:none}
+  #fcsheet .fh{position:sticky;top:0;background:#fff;padding:8px 10px 6px;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:flex-start;z-index:1}
+  #fcsheet .fh h2{font-size:14px;margin:0;line-height:1.25}
+  #fcsheet .fh .sub{color:#555;font-size:11px;margin-top:2px}
+  #fcsheet .fh button{margin-left:auto;flex:none;font-size:16px;line-height:1;padding:3px 8px;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;cursor:pointer}
+  #fcsheet .fb{padding:6px 10px 10px}
+  #fcsheet table{border-collapse:collapse;width:100%;table-layout:fixed}
+  #fcsheet th,#fcsheet td{padding:4px 3px;border-bottom:1px solid #eee;text-align:center;vertical-align:middle;overflow-wrap:anywhere}
+  #fcsheet th:first-child,#fcsheet td:first-child{text-align:left;width:31%;color:#444;font-weight:600}
+  #fcsheet thead th{font-size:11px;color:#222;position:sticky;top:0}
+  #fcsheet tr.grp td{background:#f3f3f3;color:#222;font-weight:700;text-align:left;padding-top:6px}
+  #fcsheet .cur{background:#fff4e5}
+  #fcsheet .rt{display:inline-block;padding:1px 3px;border-radius:3px;border:1px solid #999;font-weight:700;white-space:nowrap;font-size:11px}
+  @media (max-width:420px){#fcsheet .rt{font-size:10px;letter-spacing:-.2px}#fcsheet{font-size:11.5px}}
+  #fcsheet .red{color:#fff;background:#c8102e;border-radius:3px;padding:0 4px;font-weight:700}
+  #fcsheet .txt{margin:8px 0 0;line-height:1.4}#fcsheet .txt b{display:inline-block;min-width:5.5em}
+  #fcsheet .note{color:#666;font-size:11px;margin-top:8px;line-height:1.4}
+  #fcsheet .acts{display:flex;gap:6px;margin-top:8px}#fcsheet .acts a,#fcsheet .acts button{flex:1;font-size:12px;padding:6px;text-align:center;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;color:#222;text-decoration:none;cursor:pointer}
+  .pinpop .fcbtn{width:100%;margin:0 0 6px;font-size:12px;padding:5px;border:1px solid #c8102e;background:#fff;color:#c8102e;border-radius:4px;cursor:pointer;font-weight:600}
+  .fcdot{width:14px;height:14px;border-radius:50%;background:#c8102e;border:3px solid #fff;box-shadow:0 0 4px #000;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -67,7 +90,9 @@
   <button id="go" title="Search">🔍</button>
   <button id="pinmode" title="Drop a pin: tap this, then tap the map (or long-press / right-click the map)">📍</button>
   <button id="locate" title="Show my location">🎯</button>
+  <button id="fcmode" title="Fire weather forecast: tap this, then tap a place on the map">🌦</button>
 </div>
+<div id="fcsheet" hidden></div>
 <div class="panel" id="panel">
   <h1>TFS Fire Danger Rating</h1>
   <button id="toggle">Show / hide controls</button>
@@ -197,6 +222,7 @@ async function loadIndex(){
   const dates = Object.keys(index).sort().reverse();
   $('date').innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
   fillRuns(); loadDay(day);
+  if(typeof fcRefresh === 'function') fcRefresh();
 }
 function fillRuns(){
   const date = $('date').value, files = index && index[date] || {};
@@ -704,7 +730,9 @@ function popupFor(pin){
   gm.href = `https://www.google.com/maps/search/?api=1&query=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}`;
   const del = document.createElement('button'); del.textContent = 'Delete';
   del.onclick = () => removePin(pin.id);
-  pb.append(copy, gm, del); el.append(name, pc, fdr, pb);
+  const fc = document.createElement('button'); fc.className = 'fcbtn'; fc.textContent = '🌦 4-day fire weather forecast';
+  fc.onclick = () => { map.closePopup(); showForecast(pin.lat, pin.lng, pin.name); };
+  pb.append(copy, gm, del); el.append(name, pc, fdr, fc, pb);
   if(el._note) el.insertBefore(el._note, pb);
   L.DomEvent.disableClickPropagation(el);
   return el;
@@ -746,9 +774,13 @@ pins.forEach(drawPin); listPins();
 
 // Drop pins: 📍 then tap, or long-press / right-click anywhere
 let pinMode = false;
-const setPinMode = on => { pinMode = on; $('pinmode').classList.toggle('on', on); map.getContainer().style.cursor = on ? 'crosshair' : ''; };
+const setPinMode = on => { pinMode = on; if(on && typeof setFcMode === 'function') setFcMode(false); $('pinmode').classList.toggle('on', on); map.getContainer().style.cursor = on ? 'crosshair' : ''; };
 $('pinmode').onclick = () => setPinMode(!pinMode);
-map.on('click', e => { if(pinMode && !aligning){ addPin(e.latlng.lat, e.latlng.lng); setPinMode(false); } });
+map.on('click', e => {
+  if(aligning) return;
+  if(pinMode){ addPin(e.latlng.lat, e.latlng.lng); setPinMode(false); return; }
+  if(fcMode){ setFcMode(false); showForecast(e.latlng.lat, e.latlng.lng); }
+});
 map.on('contextmenu', e => { if(!aligning) addPin(e.latlng.lat, e.latlng.lng); });
 
 // Search: coordinates first, otherwise OpenStreetMap place search (biased to Tasmania)
@@ -795,6 +827,150 @@ $('locate').onclick = () => {
   }, err => { $('locate').classList.remove('on'); statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t get your location</b> (${err.message}).`; },
      {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
 };
+
+/* ---------- Fire weather forecast at a point (4 days) ----------
+   The collector saves TFS's Day 0-3 detailed fire weather forecast pages as JSON (fwf_latest.json and
+   <date>/<stamp>_fwf.json) plus district and council boundaries (boundaries.json). Tap 🌦 then the map,
+   or "4-day fire weather forecast" in a pin, to see the forecast for the district and council there.
+   TFS's pages can't be read from another site, so this needs the archive access key.               */
+let fcMode = false, fcMarker = null, fcBounds = null, fcCache = {}, fcLast = null;
+const setFcMode = on => { fcMode = on; $('fcmode').classList.toggle('on', on); if(on) setPinMode(false);
+  map.getContainer().style.cursor = on ? 'crosshair' : ''; if(on) statusEl.textContent = 'Tap a place on the map for its 4-day fire weather forecast.'; };
+$('fcmode').onclick = () => setFcMode(!fcMode);
+const fcSheet = $('fcsheet');
+L.DomEvent.disableClickPropagation(fcSheet); L.DomEvent.disableScrollPropagation(fcSheet);
+const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const normName = n => String(n || '').replace(/\(tas\.?\)/ig, '').replace(/\bcity\b/ig, '').toLowerCase().replace(/[^a-z]/g, '');
+
+function inRing(x, y, r){ let c = false; for(let i = 0, j = r.length-1; i < r.length; j = i++){
+  const [xi, yi] = r[i], [xj, yj] = r[j]; if((yi > y) !== (yj > y) && x < (xj-xi)*(y-yi)/(yj-yi) + xi) c = !c; } return c; }
+const inFeature = (f, lng, lat) => f.polys.some(poly => { let c = false; for(const r of poly) if(inRing(lng, lat, r)) c = !c; return c; });
+function nearest(list, lng, lat, maxKm){
+  let best = null, bd = Infinity; const kx = Math.cos(lat*Math.PI/180);
+  for(const f of list) for(const poly of f.polys) for(const r of poly) for(const [x, y] of r){
+    const d = Math.hypot((x-lng)*kx, y-lat)*111.2; if(d < bd){ bd = d; best = f; } }
+  return bd <= maxKm ? {f: best, km: bd} : null;
+}
+function locate(list, lat, lng, maxKm){
+  if(!list) return null;
+  const f = list.find(f => inFeature(f, lng, lat)); if(f) return {f, km: 0};
+  return nearest(list, lng, lat, maxKm);
+}
+
+// Which forecast file: Live = newest captured; Archive = newest captured on the chosen date, not after the chosen issue time
+function fcFile(){
+  if(source !== 'archive') return 'fwf_latest.json';
+  const date = $('date').value, run = $('run').value, list = (index && index[date] && index[date]['fwf.json'] || []).filter(f => f.slice(0,15) <= run);
+  return list.length ? `${date}/${list[list.length-1]}` : null;
+}
+async function fcLoad(path){
+  const base = repoBase(); if(!base) throw new Error('nokey');
+  const key = repoName() + '/' + path, hit = fcCache[key];
+  if(hit && (path !== 'fwf_latest.json' || Date.now() - hit.t < 10*60*1000)) return hit.data;
+  const data = await (await ghFetch(`${base}/${path}`)).json();
+  fcCache[key] = {t: Date.now(), data}; return data;
+}
+
+const RCOL = {'no rating':'#ffffff', 'moderate':'#64bf30', 'high':'#ffe033', 'extreme':'#f58220', 'catastrophic':'#b11a1a'};
+const rateHTML = (r, fbi) => { if(!r && fbi == null) return '–'; const c = RCOL[String(r || '').toLowerCase()];
+  return `${r ? `<span class="rt" style="background:${c || '#eee'};color:${/catas/i.test(r) ? '#fff' : '#222'}">${esc(r)}</span>` : ''}${fbi != null && fbi !== '' ? `<br>FBI ${esc(fbi)}` : ''}`; };
+const shortDate = (iso, txt) => { if(!iso) return esc(txt || ''); const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-AU', {weekday:'short'}) + '<br>' + d.getDate() + ' ' + d.toLocaleDateString('en-AU', {month:'short'}); };
+const flag = (v, red) => red ? `<span class="red" title="Over the weather alert threshold">${esc(v)}</span>` : esc(v ?? '–');
+
+function fcRender(lat, lng, name, data, dist, lga){
+  const days = (data.days || []).slice().sort((a, b) => a.day - b.day);
+  const dn = dist && dist.f.name, ln = lga && lga.f.name;
+  const D = days.map(d => (d.districts || {})[dn] || null);
+  const subFor = d => { for(const k of Object.keys(d.districts || {})){ const s = (d.districts[k].subs || []).find(s => normName(s.name) === normName(ln)); if(s) return {s, k}; } return null; };
+  const S = ln ? days.map(subFor) : days.map(() => null);
+  const subName = (S.find(x => x) || {}).s?.name;
+  const curCol = source === 'archive' ? -1 : day;                                    // Live: highlight the day shown on the map
+  const td = (fn, i) => `<td${days[i] && days[i].day === curCol ? ' class="cur"' : ''}>${fn(i)}</td>`;
+  const row = (label, fn) => `<tr><td>${label}</td>${days.map((_, i) => td(fn, i)).join('')}</tr>`;
+  const grp = t => `<tr class="grp"><td colspan="${days.length + 1}">${t}</td></tr>`;
+  const W = i => D[i] && D[i].weather || {};
+  let h = `<div class="fh"><div><h2>${esc(name || 'Fire weather forecast')}</h2>
+    <div class="sub">${lat.toFixed(5)}, ${lng.toFixed(5)} · ${fmtMGA(lat, lng)}</div>
+    <div class="sub">District: <b>${esc(dn || 'not found')}</b>${dist && dist.km ? ` (nearest, ${dist.km.toFixed(1)} km)` : ''} · Council: <b>${esc(subName || ln || 'not found')}</b>${lga && lga.km ? ` (nearest, ${lga.km.toFixed(1)} km)` : ''}</div></div>
+    <button type="button" id="fcclose" title="Close">✕</button></div><div class="fb">`;
+  if(!days.length || !dn){
+    h += `<p>${!days.length ? 'The saved forecast has no days in it.' : 'This spot isn’t inside a Tasmanian fire weather district.'}</p></div>`;
+    fcSheet.innerHTML = h; return;
+  }
+  h += `<table><thead><tr><th></th>${days.map((d, i) => `<th${d.day === curCol ? ' class="cur"' : ''}>${shortDate(d.date, d.date_text)}</th>`).join('')}</tr></thead><tbody>`;
+  h += grp(`${esc(dn)} district`);
+  h += row('Rating / FBI', i => D[i] ? rateHTML(D[i].rating, D[i].fbi) : '–');
+  if(subName){ h += grp(`${esc(subName)} (council sub-area${S.find(x => x) && S.find(x => x).k !== dn ? `, rated with ${esc(S.find(x => x).k)}` : ''})`);
+    h += row('Rating / FBI', i => S[i] ? rateHTML(S[i].s.rating, S[i].s.fbi) : '–');
+    h += row('cHaines', i => S[i] ? flag(S[i].s.cHaines, (S[i].s.red || []).includes('cHaines')) : '–');
+    h += row('Wind change (WCDI)', i => S[i] ? flag(S[i].s.wcdi, (S[i].s.red || []).includes('wcdi')) : '–'); }
+  h += grp('Weather (district)');
+  h += row('Max temp °C', i => esc(W(i).temp ?? '–'));
+  h += row('Min RH %', i => esc(W(i).rh ?? '–'));
+  h += row('Wind km/h', i => W(i).windDir ? `${esc(W(i).windDir)} ${esc(W(i).windSpeed)}` : '–');
+  h += row('Gusts km/h', i => esc(W(i).gust ?? '–'));
+  h += row('1500 m wind', i => W(i).wind1500Dir ? `${esc(W(i).wind1500Dir)} ${esc(W(i).wind1500Speed)}` : '–');
+  h += row('Mixing height m', i => esc(W(i).mixHeight ?? '–'));
+  h += row('Rain mm', i => esc(W(i).rain ?? '–'));
+  h += row('cHaines', i => D[i] ? flag(D[i].cHaines, (D[i].red || []).includes('cHaines')) : '–');
+  h += row('Wind change (WCDI)', i => D[i] ? flag(D[i].wcdi, (D[i].red || []).includes('wcdi')) : '–');
+  if(D.some(d => d && d.tal)) h += row('Thunderstorm (TAL)', i => esc(D[i] ? D[i].tal : '–'));
+  if(D.some(d => d && d.minorFuel)) h += row('Minor fuel ≥ Extreme', i => esc(D[i] && D[i].minorFuel || '–'));
+  // Fuel types, in the order of the first day's coverage
+  const fuels = ((D.find(d => d && d.fuels) || {}).fuels || []).filter(f => f.share == null || f.share > 0);
+  if(fuels.length){ h += grp('FBI by fuel type (district)');
+    for(const f of fuels) h += row(`${esc(f.type)}${f.share != null ? ` <span style="font-weight:400;color:#777">${f.share}%</span>` : ''}`, i => {
+      const x = D[i] && (D[i].fuels || []).find(g => g.type === f.type); if(!x) return '–';
+      const hi = x.ge100 && +x.ge100.cover ? 100 : x.ge50 && +x.ge50.cover ? 50 : x.ge24 && +x.ge24.cover ? 24 : 0;
+      return hi ? `<span class="red" title="Part of this fuel reaches FBI ${hi}+">${esc(x.fbi)}</span>` : esc(x.fbi); });
+    const cov = (i, k) => { const s = D[i] && D[i].fuelSummary && D[i].fuelSummary[k]; return s && +s.cover ? `${esc(s.cover)}%${s.from ? `<br>from ${esc(s.from)}` : ''}${s.dur ? `<br>dur ${esc(s.dur)}` : ''}` : '–'; };
+    for(const [k, t] of [['ge24', 'Area FBI ≥ 24'], ['ge50', 'Area FBI ≥ 50'], ['ge100', 'Area FBI ≥ 100']])
+      if(D.some(d => d && d.fuelSummary && d.fuelSummary[k] && +d.fuelSummary[k].cover)) h += row(t, i => cov(i, k));
+  }
+  h += '</tbody></table>';
+  h += days.filter(d => d.text).map(d => `<p class="txt"><b>${shortDate(d.date, d.date_text).replace('<br>', ' ')}</b> ${esc(d.text)}</p>`).join('');
+  const iss = days[0].issued || '', cap = data.captured || '';
+  h += `<div class="note">${esc(iss)}${cap ? ` Saved to the archive ${esc(cap.slice(0,10))} ${esc(cap.slice(11,13))}:${esc(cap.slice(13,15))}.` : ''}
+    ${source === 'archive' ? 'Archive mode: the forecast as issued on the chosen date.' : ''}
+    District values cover the whole fire weather district and council values the whole council area, not this exact spot.
+    A red value is over the weather alert threshold (cHaines 95th percentile, WCDI over 40) or, for a fuel type, part of it reaching FBI 24 or more.
+    Not for safety decisions — check TFS directly.</div>
+    <div class="acts"><a href="https://www.fire.tas.gov.au/fire-danger-rating/fire-weather-forecast/" target="_blank" rel="noopener">TFS forecast page</a>
+    <button type="button" id="fcpin">📍 Pin here</button></div></div>`;
+  fcSheet.innerHTML = h;
+  $('fcpin').onclick = () => { addPin(lat, lng, name); };
+}
+
+async function showForecast(lat, lng, name){
+  fcLast = {lat, lng, name};
+  if(fcMarker) map.removeLayer(fcMarker);
+  fcMarker = L.marker([lat, lng], {icon: L.divIcon({className:'', html:'<div class="fcdot"></div>', iconSize:[14,14], iconAnchor:[7,7]}), interactive:true})
+    .on('click', () => showForecast(lat, lng, name)).addTo(map);
+  fcSheet.hidden = false;
+  const head = `<div class="fh"><div><h2>${esc(name || 'Fire weather forecast')}</h2><div class="sub">${lat.toFixed(5)}, ${lng.toFixed(5)}</div></div><button type="button" id="fcclose" title="Close">✕</button></div><div class="fb">`;
+  fcSheet.innerHTML = head + 'Reading the forecast…</div>';
+  if(source === 'archive' && !index){ fcSheet.innerHTML = head + 'Reading the archive…</div>'; return; }   // loadIndex() calls back
+  const path = fcFile();
+  if(!repoBase() || !($('token').value || '').trim()){
+    fcSheet.innerHTML = head + `<p>The forecast panel reads TFS’s forecast from your archive, so it needs the access key. Choose <b>Source → Archive</b>, paste the key once, then switch back to Live if you like.</p>
+      <div class="acts"><a href="https://www.fire.tas.gov.au/fire-danger-rating/fire-weather-forecast/" target="_blank" rel="noopener">Open the TFS forecast page</a></div></div>`; return;
+  }
+  if(!path){ fcSheet.innerHTML = head + `<p>No fire weather forecast was saved for ${esc($('date').value)} up to that issue time. Forecasts have been saved since 3 Nov 2026.</p></div>`; return; }
+  try {
+    const [data, b] = await Promise.all([fcLoad(path), fcBounds || fcLoad('boundaries.json')]);
+    fcBounds = b;
+    if(!fcLast || fcLast.lat !== lat || fcLast.lng !== lng) return;                // another spot was tapped meanwhile
+    fcRender(lat, lng, name, data, locate(b.districts, lat, lng, 5), locate(b.lgas, lat, lng, 3));
+  } catch(e){
+    fcSheet.innerHTML = head + `<p><b style="color:#c8102e">Couldn’t read the forecast from the archive.</b> ${archiveError(e.message)}</p></div>`;
+  }
+}
+fcSheet.addEventListener('click', e => { if(e.target.id === 'fcclose'){ fcSheet.hidden = true; fcLast = null; if(fcMarker){ map.removeLayer(fcMarker); fcMarker = null; } } });
+// Keep an open forecast in step with the day buttons and the archive date/issue
+const fcRefresh = () => { if(fcLast && !fcSheet.hidden) showForecast(fcLast.lat, fcLast.lng, fcLast.name); };
+$('days').addEventListener('click', () => setTimeout(fcRefresh, 0));
+['date', 'run', 'source'].forEach(id => $(id).addEventListener('change', () => setTimeout(fcRefresh, 0)));
 
 loadDay(0);
 </script>
