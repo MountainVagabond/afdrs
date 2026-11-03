@@ -133,7 +133,7 @@
   </select>
   <div id="archiveBox" style="display:none">
     <label>Archive address (GitHub user/repo)</label>
-    <input type="text" id="repo" placeholder="e.g. MountainVagabond/tfs-fdr-archive" style="width:100%;box-sizing:border-box;font-size:12px">
+    <input type="text" id="repo" placeholder="e.g. MountainVagabond/afdrs-archive" style="width:100%;box-sizing:border-box;font-size:12px">
     <label>Access key (GitHub token, for a private archive)</label>
     <input type="password" id="token" placeholder="github_pat_… — remembered on this device" autocomplete="off" style="width:100%;box-sizing:border-box;font-size:12px">
     <label>Date issued</label>
@@ -217,7 +217,7 @@ const ls = {
 const $ = id => document.getElementById(id);
 const statusEl = $('status');
 
-/* ---------- Archive (GitHub repository filled by tfs_fdr_archive.py) ---------- */
+/* ---------- Archive (GitHub repository filled by tfs_fdr_archive.py; repo renamed afdrs-archive on 3 Nov 2026) ---------- */
 const RKEY = 'tfsArchiveRepo', TKEY = 'tfsArchiveToken';
 let source = 'live', index = null;          // index: {date: {"Day0.png": [filenames...], ...}}
 const repoName = () => ($('repo').value || '').trim().replace(/^https?:\/\/github\.com\//,'').replace(/\/+$/,'');
@@ -272,14 +272,16 @@ $('source').onchange = e => {
   source = e.target.value; $('archiveBox').style.display = source === 'archive' ? '' : 'none';
   if(source === 'archive'){ if(index) loadDay(day); else loadIndex(); } else loadDay(day);
 };
-$('repo').value = ls.get(RKEY) || 'MountainVagabond/tfs-fdr-archive';
+// Move devices that saved the archive under its old name (renamed 3 Nov 2026)
+if(/^mountainvagabond\/tfs-fdr-archive$/i.test(String(ls.get(RKEY) || '').trim())) ls.set(RKEY, 'MountainVagabond/afdrs-archive');
+$('repo').value = ls.get(RKEY) || 'MountainVagabond/afdrs-archive';
 $('token').value = ls.get(TKEY) || '';
 
 /* ---------- Key gate ----------
    The page stays hidden until this device has an access key that GitHub accepts for the archive.
    A saved key is re-checked in the background; if GitHub can't be reached (no signal) the page
    stays open, so a weak connection in the field never locks anyone out. */
-const DEFAULT_REPO = 'MountainVagabond/tfs-fdr-archive';
+const DEFAULT_REPO = 'MountainVagabond/afdrs-archive';
 async function gateCheck(key){
   try {
     const r = await fetch(`https://api.github.com/repos/${repoName() || DEFAULT_REPO}`,
@@ -1028,7 +1030,7 @@ function keyBox(intro){
 fcSheet.addEventListener('click', e => {
   if(e.target.id !== 'fckeysave') return;
   const k = cleanKey($('fckey').value); if(!k){ $('fckey').focus(); return; }
-  $('token').value = k; if(!repoName()) $('repo').value = 'MountainVagabond/tfs-fdr-archive';
+  $('token').value = k; if(!repoName()) $('repo').value = DEFAULT_REPO;
   ls.set(TKEY, k); ls.set(RKEY, $('repo').value.trim()); fcCache = {}; fcBounds = null;
   if(source === 'archive') loadIndex(); else loadDay(day);                          // also lets pins read ratings again
   if(fcLast) showForecast(fcLast.lat, fcLast.lng, fcLast.name);
