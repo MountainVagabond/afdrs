@@ -192,16 +192,22 @@ const repoName = () => ($('repo').value || '').trim().replace(/^https?:\/\/githu
 const repoBase = () => repoName() ? `https://api.github.com/repos/${repoName()}/contents/fdr_archive` : null;
 // Read a file from the archive through GitHub's API (works for public repos, and private ones with a token)
 async function ghFetch(url){
-  const tok = ($('token').value || '').trim(), h = {Accept: 'application/vnd.github.raw+json'};
+  // Keys are only letters, digits and _ ; anything else (spaces, invisible characters from a notes app or
+  // password manager) would make the browser refuse to send the request at all, so strip it.
+  const tok = cleanKey($('token').value), h = {Accept: 'application/vnd.github.raw+json'};
   if(tok) h.Authorization = 'Bearer ' + tok;
-  const r = await fetch(url, {headers: h, cache: 'no-store'});
+  let r;
+  try { r = await fetch(url, {headers: h, cache: 'no-store'}); }
+  catch(e){ throw new Error('net: ' + (e && e.message || e)); }
   if(!r.ok) throw new Error(r.status);
   return r;
 }
+const cleanKey = k => String(k || '').replace(/[^A-Za-z0-9_]/g, '');
 const archiveError = code => code == 401 ? 'The access key was rejected — check it, or that it hasn’t expired.'
   : code == 404 ? 'Archive not found — check the user/repo address, and if the archive is private, that the access key is entered and allowed to read it.'
   : code == 403 ? 'GitHub refused the request (too many requests without a key, or the key lacks access).'
-  : 'Couldn’t reach GitHub.';
+  : /^net:/.test(code) ? `Couldn’t reach GitHub — check the phone has signal, then try again. (${String(code).slice(5)})`
+  : `Something went wrong reading the archive (${code}).`;
 function archiveFile(d){
   // newest file for Day d whose issue stamp is not after the chosen issue time (unchanged images aren't re-saved)
   const date = $('date').value, run = $('run').value, list = index && index[date] && index[date][`Day${d}.png`] || [];
@@ -237,7 +243,7 @@ $('source').onchange = e => {
 $('repo').value = ls.get(RKEY) || 'MountainVagabond/tfs-fdr-archive';
 $('token').value = ls.get(TKEY) || '';
 $('repo').onchange = loadIndex;
-$('token').onchange = loadIndex;
+$('token').onchange = () => { $('token').value = cleanKey($('token').value); loadIndex(); };
 $('date').onchange = () => { fillRuns(); loadDay(day); };
 $('run').onchange = () => loadDay(day);
 
@@ -867,7 +873,8 @@ async function fcLoad(path){
   const base = repoBase(); if(!base) throw new Error('nokey');
   const key = repoName() + '/' + path, hit = fcCache[key];
   if(hit && (path !== 'fwf_latest.json' || Date.now() - hit.t < 10*60*1000)) return hit.data;
-  const data = await (await ghFetch(`${base}/${path}`)).json();
+  const r = await ghFetch(`${base}/${path}`);
+  let data; try { data = await r.json(); } catch(e){ throw new Error(`the file ${path} didn’t read correctly`); }
   fcCache[key] = {t: Date.now(), data}; return data;
 }
 
@@ -942,6 +949,22 @@ function fcRender(lat, lng, name, data, dist, lga){
   $('fcpin').onclick = () => { addPin(lat, lng, name); };
 }
 
+// A paste-the-key box inside the forecast panel, so nobody has to go through Controls
+function keyBox(intro){
+  return `<p>${intro}</p><p style="margin:6px 0 4px"><b>Paste your access key</b> (the long code starting <code>github_pat_</code>):</p>
+    <div style="display:flex;gap:6px"><input id="fckey" type="password" autocomplete="off" placeholder="github_pat_…" style="flex:1;min-width:0;font-size:16px;padding:6px;border:1px solid #bbb;border-radius:4px">
+    <button type="button" id="fckeysave" style="font-size:14px;padding:6px 10px;border:1px solid #c8102e;background:#c8102e;color:#fff;border-radius:4px;cursor:pointer">Save</button></div>
+    <div class="note">Saved on this phone/browser only. It’s the read-only key made on GitHub for this viewer, not your GitHub password.</div>`;
+}
+fcSheet.addEventListener('click', e => {
+  if(e.target.id !== 'fckeysave') return;
+  const k = cleanKey($('fckey').value); if(!k){ $('fckey').focus(); return; }
+  $('token').value = k; if(!repoName()) $('repo').value = 'MountainVagabond/tfs-fdr-archive';
+  ls.set(TKEY, k); ls.set(RKEY, $('repo').value.trim()); fcCache = {}; fcBounds = null;
+  if(source === 'archive') loadIndex(); else loadDay(day);                          // also lets pins read ratings again
+  if(fcLast) showForecast(fcLast.lat, fcLast.lng, fcLast.name);
+});
+
 async function showForecast(lat, lng, name){
   fcLast = {lat, lng, name};
   if(fcMarker) map.removeLayer(fcMarker);
@@ -952,9 +975,9 @@ async function showForecast(lat, lng, name){
   fcSheet.innerHTML = head + 'Reading the forecast…</div>';
   if(source === 'archive' && !index){ fcSheet.innerHTML = head + 'Reading the archive…</div>'; return; }   // loadIndex() calls back
   const path = fcFile();
-  if(!repoBase() || !($('token').value || '').trim()){
-    fcSheet.innerHTML = head + `<p>The forecast panel reads TFS’s forecast from your archive, so it needs the access key. Choose <b>Source → Archive</b>, paste the key once, then switch back to Live if you like.</p>
-      <div class="acts"><a href="https://www.fire.tas.gov.au/fire-danger-rating/fire-weather-forecast/" target="_blank" rel="noopener">Open the TFS forecast page</a></div></div>`; return;
+  if(!repoBase() || !cleanKey($('token').value)){
+    fcSheet.innerHTML = head + keyBox('The forecast comes from your archive, so this phone needs your access key once.') + `
+      <div class="acts" style="margin-top:8px"><a href="https://www.fire.tas.gov.au/fire-danger-rating/fire-weather-forecast/" target="_blank" rel="noopener">Open the TFS forecast page</a></div></div>`; return;
   }
   if(!path){ fcSheet.innerHTML = head + `<p>No fire weather forecast was saved for ${esc($('date').value)} up to that issue time. Forecasts have been saved since 3 Nov 2026.</p></div>`; return; }
   try {
@@ -963,7 +986,11 @@ async function showForecast(lat, lng, name){
     if(!fcLast || fcLast.lat !== lat || fcLast.lng !== lng) return;                // another spot was tapped meanwhile
     fcRender(lat, lng, name, data, locate(b.districts, lat, lng, 5), locate(b.lgas, lat, lng, 3));
   } catch(e){
-    fcSheet.innerHTML = head + `<p><b style="color:#c8102e">Couldn’t read the forecast from the archive.</b> ${archiveError(e.message)}</p></div>`;
+    const code = e.message, keyIssue = code == 401 || code == 404 || code == 403;
+    fcSheet.innerHTML = head + `<p><b style="color:#c8102e">Couldn’t read the forecast from the archive.</b> ${esc(archiveError(code))}</p>
+      <div class="acts"><button type="button" id="fcretry">Try again</button></div>
+      ${keyIssue ? keyBox('If the key is wrong or has expired, paste a new one:') : ''}</div>`;
+    $('fcretry').onclick = () => { fcCache = {}; showForecast(lat, lng, name); };
   }
 }
 fcSheet.addEventListener('click', e => { if(e.target.id === 'fcclose'){ fcSheet.hidden = true; fcLast = null; if(fcMarker){ map.removeLayer(fcMarker); fcMarker = null; } } });
