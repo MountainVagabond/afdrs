@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Tas Fire Danger Overlay</title>
+<title>Tasmania AFDRS Dashboard (Bootleg/Unofficial)</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
@@ -89,9 +89,30 @@
   .stdot.port::before{border-style:dashed}
   .stkey{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:#444;margin-top:4px}.stkey i{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #555;vertical-align:-1px;margin-right:3px}
   .fcdot{width:14px;height:14px;border-radius:50%;background:#c8102e;border:3px solid #fff;box-shadow:0 0 4px #000;box-sizing:border-box}
+  /* Key gate: nothing shows until a working access key is saved on this device */
+  #gate{display:none;position:fixed;inset:0;z-index:9999;background:#111;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+  body.locked #gate{display:flex}
+  body.locked > :not(#gate):not(script){visibility:hidden}
+  #gate .card{background:#fff;color:#222;border-radius:10px;padding:20px;width:100%;max-width:380px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+  #gate h1{font-size:20px;margin:0}#gate .unoff{display:block;font-size:13px;font-weight:400;color:#666;margin:2px 0 14px}
+  #gate p{margin:0 0 10px}
+  #gate .in{display:flex;gap:8px}#gate input{flex:1;min-width:0;font-size:16px;padding:8px;border:1px solid #bbb;border-radius:6px}
+  #gate button{font-size:15px;padding:8px 14px;border:1px solid #c8102e;background:#c8102e;color:#fff;border-radius:6px;cursor:pointer;font-weight:600}
+  #gatemsg{min-height:1.4em;margin-top:8px;font-size:13px;color:#c8102e}
+  #gate .fine{font-size:11px;color:#666;margin-top:12px}
+  .panel .unoff{display:block;font-size:11px;font-weight:400;color:#666}
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="gate" role="dialog" aria-labelledby="gateh">
+  <div class="card">
+    <h1 id="gateh">Tasmania AFDRS Dashboard<span class="unoff">(Bootleg/Unofficial)</span></h1>
+    <p>Private tool. Enter your access key to open it.</p>
+    <div class="in"><input id="gatekey" type="password" autocomplete="off" placeholder="Access key" aria-label="Access key"><button type="button" id="gatego">Open</button></div>
+    <div id="gatemsg" aria-live="polite"></div>
+    <div class="fine">The key is saved on this device only. Unofficial personal tool, not affiliated with or endorsed by any fire agency or the Bureau of Meteorology.</div>
+  </div>
+</div>
 <div id="map"></div>
 <div id="results"></div>
 <div id="searchbar">
@@ -103,7 +124,7 @@
 </div>
 <div id="fcsheet" hidden></div>
 <div class="panel" id="panel">
-  <h1>TFS Fire Danger Rating</h1>
+  <h1>Tasmania AFDRS Dashboard<span class="unoff">(Bootleg/Unofficial)</span></h1>
   <button id="toggle">Show / hide controls</button>
   <label>Source</label>
   <select id="source">
@@ -135,7 +156,7 @@
     <option value="topo">Topographic (Esri)</option>
     <option value="sat">Esri satellite</option>
   </select>
-  <label>FDR coastline outline</label>
+  <label>Map coastline outline</label>
   <select id="outline">
     <option value="magenta">Magenta</option>
     <option value="cyan">Cyan</option>
@@ -253,6 +274,38 @@ $('source').onchange = e => {
 };
 $('repo').value = ls.get(RKEY) || 'MountainVagabond/tfs-fdr-archive';
 $('token').value = ls.get(TKEY) || '';
+
+/* ---------- Key gate ----------
+   The page stays hidden until this device has an access key that GitHub accepts for the archive.
+   A saved key is re-checked in the background; if GitHub can't be reached (no signal) the page
+   stays open, so a weak connection in the field never locks anyone out. */
+const DEFAULT_REPO = 'MountainVagabond/tfs-fdr-archive';
+async function gateCheck(key){
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repoName() || DEFAULT_REPO}`,
+      {headers: {Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + key}, cache: 'no-store'});
+    return r.ok ? 'ok' : (r.status == 401 || r.status == 404) ? 'bad' : 'other';
+  } catch(e){ return 'offline'; }
+}
+function gateShow(msg){
+  document.body.classList.add('locked'); $('gatemsg').textContent = msg || '';
+  setTimeout(() => $('gatekey').focus(), 0);
+}
+async function gateOpen(){
+  const k = cleanKey($('gatekey').value); if(!k){ $('gatekey').focus(); return; }
+  $('gatemsg').textContent = 'Checking the key…'; $('gatego').disabled = true;
+  const r = await gateCheck(k); $('gatego').disabled = false;
+  if(r === 'ok'){ ls.set(TKEY, k); if(!ls.get(RKEY)) ls.set(RKEY, DEFAULT_REPO); location.reload(); return; }
+  $('gatemsg').textContent = r === 'bad' ? 'That key wasn’t accepted. Check it’s complete and hasn’t expired.'
+    : r === 'offline' ? 'Couldn’t reach GitHub to check the key. Check the connection and try again.'
+    : 'GitHub couldn’t check the key just now. Try again in a minute.';
+}
+$('gatego').onclick = gateOpen;
+$('gatekey').onkeydown = e => { if(e.key === 'Enter') gateOpen(); };
+{ const k = cleanKey(ls.get(TKEY));
+  if(!k) gateShow();
+  else { document.body.classList.remove('locked');
+         gateCheck(k).then(r => { if(r === 'bad') gateShow('The key saved on this device was rejected; it may have expired. Paste a current key.'); }); } }
 $('repo').onchange = loadIndex;
 $('token').onchange = () => { $('token').value = cleanKey($('token').value); loadIndex(); };
 $('date').onchange = () => { fillRuns(); loadDay(day); };
