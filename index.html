@@ -80,6 +80,11 @@
   #fcsheet .note{color:#666;font-size:11px;margin-top:8px;line-height:1.4}
   #fcsheet .acts{display:flex;gap:6px;margin-top:8px}#fcsheet .acts a,#fcsheet .acts button{flex:1;font-size:12px;padding:6px;text-align:center;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;color:#222;text-decoration:none;cursor:pointer}
   .pinpop .fcbtn{width:100%;margin:0 0 6px;font-size:12px;padding:5px;border:1px solid #c8102e;background:#fff;color:#c8102e;border-radius:4px;cursor:pointer;font-weight:600}
+  .stpop{min-width:200px;font-size:12px}.stpop h3{font-size:13px;margin:0 0 2px}.stpop .k{color:#555;margin-bottom:6px}
+  .stpop a.go{display:block;text-align:center;padding:7px;margin:4px 0;border-radius:4px;background:#c8102e;color:#fff;text-decoration:none;font-weight:600}
+  .stpop a.go2,.stpop button{display:block;width:100%;box-sizing:border-box;text-align:center;padding:5px;margin:4px 0;border-radius:4px;border:1px solid #bbb;background:#f4f4f4;color:#222;text-decoration:none;font-size:12px;cursor:pointer}
+  .stpop .note{color:#666;font-size:11px;margin-top:4px}
+  .stkey{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:#444;margin-top:4px}.stkey i{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #555;vertical-align:-1px;margin-right:3px}
   .fcdot{width:14px;height:14px;border-radius:50%;background:#c8102e;border:3px solid #fff;box-shadow:0 0 4px #000;box-sizing:border-box}
 </style>
 </head>
@@ -165,6 +170,8 @@
     <button id="exp">Copy alignment</button>
     <button id="imp">Paste alignment</button>
   </div>
+  <label><input type="checkbox" id="stations" style="vertical-align:-2px"> Weather stations (live pages)</label>
+  <div class="stkey"><span><i style="background:#37474f"></i>BoM</span><span><i style="background:#c8102e"></i>TFS</span><span><i style="background:#2e7d32"></i>Parks</span></div>
   <label>Pins <button id="clearpins" style="float:right;font-size:11px;padding:1px 6px;cursor:pointer">Clear all</button></label>
   <div id="pinlist" class="small">No pins yet — long-press the map or use 📍.</div>
   <label>Load PNG from file</label>
@@ -1004,6 +1011,54 @@ fcSheet.addEventListener('click', e => { if(e.target.id === 'fcclose'){ fcSheet.
 const fcRefresh = () => { if(fcLast && !fcSheet.hidden) showForecast(fcLast.lat, fcLast.lng, fcLast.name); };
 $('days').addEventListener('click', () => setTimeout(fcRefresh, 0));
 ['date', 'run', 'source'].forEach(id => $(id).addEventListener('change', () => setTimeout(fcRefresh, 0)));
+
+/* ---------- Weather stations: each dot opens that station's live page on the Tas Fire Weather Map ----------
+   Positions come from fdr_archive/stations.json (BoM list from the site's app; agency positions refreshed by
+   each archive run, since portables move). No readings are copied: tapping a dot opens the live site.  */
+const TWM = 'https://www.tasfireweathermap.com.au', SKEY = 'tfsStations';
+const stLayer = L.layerGroup(); let stData = null, stLoading = false;
+const ST_COL = {bom:'#37474f', TFS:'#c8102e', PWS:'#2e7d32'};
+const stKind = st => st.kind === 'bom' ? 'BoM weather station' : st.kind === 'portable' ? `${st.owner === 'PWS' ? 'Parks' : st.owner} portable station (PAWS/RAWS)`
+  : st.kind === 'recce' ? 'Parks recce station' : `${st.owner === 'PWS' ? 'Parks' : st.owner} fixed station`;
+function stPopup(st, posAt){
+  const el = document.createElement('div'); el.className = 'stpop';
+  const url = TWM + st.page, dash = TWM + st.page.replace('/meteogram', '/dashboard');
+  el.innerHTML = `<h3>${esc(st.name)}</h3><div class="k">${esc(stKind(st))}<br>${fmtMGA(st.lat, st.lng)}${st.kind !== 'bom' && posAt ? `<br>Position as of ${esc(posAt.slice(11,16))} ${esc(posAt.slice(8,10))}/${esc(posAt.slice(5,7))}` : ''}</div>
+    <a class="go" href="${url}" target="_blank" rel="noopener">Open live meteogram ↗</a>
+    <a class="go2" href="${dash}" target="_blank" rel="noopener">Open station dashboard ↗</a>
+    <button type="button">🌦 4-day forecast here</button>
+    <div class="note">Opens the Tas Fire Weather Map with the latest readings. If it asks you to log in, use the shared FPO login (your browser can fill it in).</div>`;
+  el.querySelector('button').onclick = () => { map.closePopup(); showForecast(st.lat, st.lng, st.name); };
+  L.DomEvent.disableClickPropagation(el);
+  return el;
+}
+function drawStations(){
+  stLayer.clearLayers(); if(!stData) return;
+  const all = [...(stData.bom || []), ...(stData.agency || [])];
+  all.forEach(st => { if(st.kind !== 'bom') st.owner = /TFS/.test(st.name) ? 'TFS' : /PWS/.test(st.name) ? 'PWS' : st.owner; });
+  for(const st of all){
+    const col = st.kind === 'bom' ? ST_COL.bom : (ST_COL[st.owner] || '#6a1b9a');
+    L.circleMarker([st.lat, st.lng], {radius: st.kind === 'bom' ? 6 : 7, color:'#fff', weight:2, fillColor:col, fillOpacity:1,
+      dashArray: st.kind === 'portable' ? '3 2' : null, bubblingMouseEvents:false})
+      .bindPopup(() => stPopup(st, stData.positionsAt), {minWidth:210}).addTo(stLayer);
+  }
+}
+async function showStations(on, quiet){
+  ls.set(SKEY, on); $('stations').checked = on;
+  if(!on){ map.removeLayer(stLayer); return; }
+  stLayer.addTo(map);
+  if(stData || stLoading) return;
+  if(!repoBase() || !cleanKey($('token').value)){ if(quiet) return; statusEl.innerHTML = '<b style="color:#c8102e">Weather stations need the access key.</b> Tap 🌦 then the map to paste it, or enter it under Source → Archive.'; return; }
+  stLoading = true;
+  try { stData = await (await ghFetch(`${repoBase()}/stations.json`)).json(); drawStations();
+        statusEl.textContent = `${(stData.bom||[]).length + (stData.agency||[]).length} weather stations shown — tap one for its live page.`; }
+  catch(e){ statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t load the weather stations.</b> ${esc(archiveError(e.message))}`; }
+  stLoading = false;
+}
+$('stations').onchange = e => showStations(e.target.checked);
+{ const pref = ls.get(SKEY); if(pref !== false) showStations(true, true); else $('stations').checked = false; }
+// When a key is saved from the forecast panel, load the stations too
+fcSheet.addEventListener('click', e => { if(e.target.id === 'fckeysave' && $('stations').checked && !stData) setTimeout(() => showStations(true), 0); });
 
 loadDay(0);
 </script>
