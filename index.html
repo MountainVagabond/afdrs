@@ -74,6 +74,7 @@
   #fcsheet .cur{background:#fff4e5}
   #fcsheet .rt{display:inline-block;padding:1px 3px;border-radius:3px;border:1px solid #999;font-weight:700;white-space:nowrap;font-size:11px}
   @media (max-width:420px){#fcsheet .rt{font-size:10px;letter-spacing:-.2px}#fcsheet{font-size:11.5px}}
+  #fcsheet .fbi{display:inline-block;min-width:2.2em;padding:1px 4px;border-radius:3px;border:1px solid #999;font-weight:700}
   #fcsheet .red{color:#fff;background:#c8102e;border-radius:3px;padding:0 4px;font-weight:700}
   #fcsheet .txt{margin:8px 0 0;line-height:1.4}#fcsheet .txt b{display:inline-block;min-width:5.5em}
   #fcsheet .note{color:#666;font-size:11px;margin-top:8px;line-height:1.4}
@@ -880,7 +881,11 @@ async function fcLoad(path){
 
 const RCOL = {'no rating':'#ffffff', 'moderate':'#64bf30', 'high':'#ffe033', 'extreme':'#f58220', 'catastrophic':'#b11a1a'};
 const rateHTML = (r, fbi) => { if(!r && fbi == null) return '–'; const c = RCOL[String(r || '').toLowerCase()];
-  return `${r ? `<span class="rt" style="background:${c || '#eee'};color:${/catas/i.test(r) ? '#fff' : '#222'}">${esc(r)}</span>` : ''}${fbi != null && fbi !== '' ? `<br>FBI ${esc(fbi)}` : ''}`; };
+  return `${r ? `<span class="rt" style="background:${c || '#eee'};color:${/catas/i.test(r) ? '#fff' : '#222'}">${esc(r)}</span>` : ''}${fbi != null && fbi !== '' ? `<br>FBI ${fbiChip(fbi)}` : ''}`; };
+// Any FBI number, coloured by its AFDRS band: 0–11 white, 12–23 green, 24–49 yellow, 50–99 orange, 100+ dark red
+const fbiBand = v => { v = +v; return !isFinite(v) ? null : v >= 100 ? 'catastrophic' : v >= 50 ? 'extreme' : v >= 24 ? 'high' : v >= 12 ? 'moderate' : 'no rating'; };
+const fbiChip = (v, title) => { const b = fbiBand(v); if(v == null || v === '' || !b) return esc(v ?? '–');
+  return `<span class="fbi" style="background:${RCOL[b]};color:${b === 'catastrophic' ? '#fff' : '#222'}"${title ? ` title="${esc(title)}"` : ''}>${esc(v)}</span>`; };
 const shortDate = (iso, txt) => { if(!iso) return esc(txt || ''); const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('en-AU', {weekday:'short'}) + '<br>' + d.getDate() + ' ' + d.toLocaleDateString('en-AU', {month:'short'}); };
 const flag = (v, red) => red ? `<span class="red" title="Over the weather alert threshold">${esc(v)}</span>` : esc(v ?? '–');
@@ -929,9 +934,10 @@ function fcRender(lat, lng, name, data, dist, lga){
   if(fuels.length){ h += grp('FBI by fuel type (district)');
     for(const f of fuels) h += row(`${esc(f.type)}${f.share != null ? ` <span style="font-weight:400;color:#777">${f.share}%</span>` : ''}`, i => {
       const x = D[i] && (D[i].fuels || []).find(g => g.type === f.type); if(!x) return '–';
-      const hi = x.ge100 && +x.ge100.cover ? 100 : x.ge50 && +x.ge50.cover ? 50 : x.ge24 && +x.ge24.cover ? 24 : 0;
-      return hi ? `<span class="red" title="Part of this fuel reaches FBI ${hi}+">${esc(x.fbi)}</span>` : esc(x.fbi); });
-    const cov = (i, k) => { const s = D[i] && D[i].fuelSummary && D[i].fuelSummary[k]; return s && +s.cover ? `${esc(s.cover)}%${s.from ? `<br>from ${esc(s.from)}` : ''}${s.dur ? `<br>dur ${esc(s.dur)}` : ''}` : '–'; };
+      const pc = x.ge100 && +x.ge100.cover ? [100, x.ge100.cover] : x.ge50 && +x.ge50.cover ? [50, x.ge50.cover] : x.ge24 && +x.ge24.cover ? [24, x.ge24.cover] : null;
+      return fbiChip(x.fbi, pc ? `${pc[1]}% of the district reaches FBI ${pc[0]}+` : ''); });
+    const cov = (i, k) => { const s = D[i] && D[i].fuelSummary && D[i].fuelSummary[k]; const band = {ge24: 24, ge50: 50, ge100: 100}[k];
+      return s && +s.cover ? `<span class="fbi" style="background:${RCOL[fbiBand(band)]};color:${band === 100 ? '#fff' : '#222'}">${esc(s.cover)}%</span>${s.from ? `<br>from ${esc(s.from)}` : ''}${s.dur ? `<br>dur ${esc(s.dur)}` : ''}` : '–'; };
     for(const [k, t] of [['ge24', 'Area FBI ≥ 24'], ['ge50', 'Area FBI ≥ 50'], ['ge100', 'Area FBI ≥ 100']])
       if(D.some(d => d && d.fuelSummary && d.fuelSummary[k] && +d.fuelSummary[k].cover)) h += row(t, i => cov(i, k));
   }
@@ -941,7 +947,7 @@ function fcRender(lat, lng, name, data, dist, lga){
   h += `<div class="note">${esc(iss)}${cap ? ` Saved to the archive ${esc(cap.slice(0,10))} ${esc(cap.slice(11,13))}:${esc(cap.slice(13,15))}.` : ''}
     ${source === 'archive' ? 'Archive mode: the forecast as issued on the chosen date.' : ''}
     District values cover the whole fire weather district and council values the whole council area, not this exact spot.
-    A red value is over the weather alert threshold (cHaines 95th percentile, WCDI over 40) or, for a fuel type, part of it reaching FBI 24 or more.
+    FBI values are coloured by AFDRS band (white No rating, green Moderate, yellow High, orange Extreme, dark red Catastrophic). A red cHaines or WCDI is over TFS’s weather alert threshold (cHaines 95th percentile, WCDI over 40).
     Not for safety decisions — check TFS directly.</div>
     <div class="acts"><a href="https://www.fire.tas.gov.au/fire-danger-rating/fire-weather-forecast/" target="_blank" rel="noopener">TFS forecast page</a>
     <button type="button" id="fcpin">📍 Pin here</button></div></div>`;
