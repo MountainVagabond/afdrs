@@ -1065,10 +1065,10 @@ const saveShapes = () => ls.set(SHAPEKEY, shapes);
 const saveTrace = () => trace ? ls.set(TRACEKEY, {pts: trace.pts, gaps: trace.gaps, started: trace.started}) : ls.del(TRACEKEY);
 const shapeLayer = L.layerGroup().addTo(map), shapeLayers = new Map();
 const TRACE_COL = '#00e5ff', TRACE_CASE = '#000';
-// Colours for traced areas. None of them is a rating colour (white, green, yellow, orange, dark red);
-// each has the badge text colour and outline casing that reads best on it.
+// Colours for traced areas, kept clear of the rating colours (green, yellow, orange, dark red). White is fine:
+// No rating shows as clear on the overlay, not solid white. Each has the badge text and outline casing that reads best.
 const AREA_COLS = [['#00e5ff','Cyan','#000','#000'],['#ff4fa3','Pink','#000','#000'],['#b388ff','Purple','#000','#000'],
-                   ['#2f5bff','Blue','#fff','#fff'],['#111111','Black','#fff','#fff']];
+                   ['#2f5bff','Blue','#fff','#fff'],['#ffffff','White','#000','#000'],['#111111','Black','#fff','#fff']];
 const areaCol = c => AREA_COLS.find(a => a[0] === c) || AREA_COLS[0];
 const hx = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const traceCase = L.polyline([], {color: TRACE_CASE, weight: 9, opacity: .85, interactive: false});
