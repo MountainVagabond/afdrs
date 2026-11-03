@@ -5,7 +5,7 @@ holds the page alone, with no data and no keys.
 
 Unofficial: not authorised or endorsed by, or affiliated with, any fire agency or the
 Bureau of Meteorology. May be shared, by invitation only, with individuals who are
-already well informed about bushfire risk, and shared at their own risk. Personal
+already well informed about bushfire risk, and used at their own risk. Personal
 judgement, knowledge and experience should be applied when viewing this tool. Use
 alongside official forecasts and warnings, not instead of them.
 
