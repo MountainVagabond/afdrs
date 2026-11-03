@@ -1065,8 +1065,11 @@ const saveShapes = () => ls.set(SHAPEKEY, shapes);
 const saveTrace = () => trace ? ls.set(TRACEKEY, {pts: trace.pts, gaps: trace.gaps, started: trace.started}) : ls.del(TRACEKEY);
 const shapeLayer = L.layerGroup().addTo(map), shapeLayers = new Map();
 const TRACE_COL = '#00e5ff', TRACE_CASE = '#000';
-// High-visibility colours for traced areas, chosen to stand apart from the rating colours and the satellite image
-const AREA_COLS = [['#00e5ff','Cyan'],['#ffea00','Yellow'],['#ff4fa3','Pink'],['#ffffff','White'],['#b388ff','Purple']];
+// Colours for traced areas. None of them is a rating colour (white, green, yellow, orange, dark red);
+// each has the badge text colour and outline casing that reads best on it.
+const AREA_COLS = [['#00e5ff','Cyan','#000','#000'],['#ff4fa3','Pink','#000','#000'],['#b388ff','Purple','#000','#000'],
+                   ['#2f5bff','Blue','#fff','#fff'],['#111111','Black','#fff','#fff']];
+const areaCol = c => AREA_COLS.find(a => a[0] === c) || AREA_COLS[0];
 const hx = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const traceCase = L.polyline([], {color: TRACE_CASE, weight: 9, opacity: .85, interactive: false});
 const traceLine = L.polyline([], {color: TRACE_COL, weight: 5, opacity: 1, interactive: false});
@@ -1188,7 +1191,7 @@ function shapePopup(shape){
   name.onchange = () => { shape.name = name.value.trim() || 'Area'; saveShapes(); redrawShape(shape, true); };
   const cols = document.createElement('div'); cols.className = 'cols'; cols.append('Colour');
   for(const [c, label] of AREA_COLS){ const b = document.createElement('button'); b.type = 'button'; b.title = label; b.setAttribute('aria-label', label);
-    b.style.background = c; if((shape.col || TRACE_COL) === c) b.className = 'on';
+    b.style.background = c; if(areaCol(shape.col)[0] === c) b.className = 'on';
     b.onclick = () => { shape.col = c; saveShapes(); redrawShape(shape, true); }; cols.append(b); }
   const stats = document.createElement('div'); stats.className = 'stats';
   stats.innerHTML = `Area <b>${fmtArea(shape.area)}</b><br>Perimeter <b>${fmtLen(shape.perim)}</b>`;
@@ -1209,11 +1212,11 @@ function shapePopup(shape){
   return el;
 }
 function drawShape(shape){
-  const col = shape.col || TRACE_COL;
-  const casing = L.polygon(shape.pts, {color: '#000', weight: 9, opacity: .85, fill: false, interactive: false}).addTo(shapeLayer);
+  const [col, , txt, cas] = areaCol(shape.col);
+  const casing = L.polygon(shape.pts, {color: cas, weight: 9, opacity: .85, fill: false, interactive: false}).addTo(shapeLayer);
   const poly = L.polygon(shape.pts, {color: col, weight: 5, fillColor: col, fillOpacity: .3}).addTo(shapeLayer);
   const dot = L.marker(shape.c, {icon: L.divIcon({className: '', iconSize: [0,0], iconAnchor: [0,0],
-      html: `<div class="shlab" style="--c:${col}">${hx(shape.name)}</div>`}), zIndexOffset: 500, keyboard: true, title: shape.name}).addTo(shapeLayer);
+      html: `<div class="shlab" style="--c:${col};color:${txt}">${hx(shape.name)}</div>`}), zIndexOffset: 500, keyboard: true, title: shape.name}).addTo(shapeLayer);
   poly.bindPopup(() => shapePopup(shape), {minWidth: 210}); dot.on('click', () => poly.openPopup(shape.c));
   shapeLayers.set(shape.id, {poly, casing, dot});
 }
@@ -1231,7 +1234,7 @@ function listShapes(){
   if(!shapes.length){ el.textContent = 'None yet — tap 👣 and walk the edge.'; return; }
   for(const s of shapes){
     const row = document.createElement('div'), sw = document.createElement('span'), t = document.createElement('span');
-    sw.className = 'sw'; sw.style.background = s.col || TRACE_COL; t.textContent = `${s.name} — ${(s.area/10000).toFixed(2)} ha`;
+    sw.className = 'sw'; sw.style.background = areaCol(s.col)[0]; t.textContent = `${s.name} — ${(s.area/10000).toFixed(2)} ha`;
     row.append(sw, t);
     row.onclick = () => { const l = shapeLayers.get(s.id); map.fitBounds(l.poly.getBounds(), {padding: [40, 40], maxZoom: 18}); l.poly.openPopup(s.c); };
     el.append(row);
