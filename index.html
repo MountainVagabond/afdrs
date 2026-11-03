@@ -84,6 +84,9 @@
   .stpop a.go{display:block;text-align:center;padding:7px;margin:4px 0;border-radius:4px;background:#c8102e;color:#fff;text-decoration:none;font-weight:600}
   .stpop a.go2,.stpop button{display:block;width:100%;box-sizing:border-box;text-align:center;padding:5px;margin:4px 0;border-radius:4px;border:1px solid #bbb;background:#f4f4f4;color:#222;text-decoration:none;font-size:12px;cursor:pointer}
   .stpop .note{color:#666;font-size:11px;margin-top:4px}
+  .stdot{width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .stdot::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px #222,0 1px 3px rgba(0,0,0,.6)}
+  .stdot.port::before{border-style:dashed}
   .stkey{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:#444;margin-top:4px}.stkey i{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #555;vertical-align:-1px;margin-right:3px}
   .fcdot{width:14px;height:14px;border-radius:50%;background:#c8102e;border:3px solid #fff;box-shadow:0 0 4px #000;box-sizing:border-box}
 </style>
@@ -1038,8 +1041,9 @@ function drawStations(){
   all.forEach(st => { if(st.kind !== 'bom') st.owner = /TFS/.test(st.name) ? 'TFS' : /PWS/.test(st.name) ? 'PWS' : st.owner; });
   for(const st of all){
     const col = st.kind === 'bom' ? ST_COL.bom : (ST_COL[st.owner] || '#6a1b9a');
-    L.circleMarker([st.lat, st.lng], {radius: st.kind === 'bom' ? 6 : 7, color:'#fff', weight:2, fillColor:col, fillOpacity:1,
-      dashArray: st.kind === 'portable' ? '3 2' : null, bubblingMouseEvents:false})
+    // A marker (not a vector circle): it sits above the fire danger overlay, and its 34 px box is easy to tap
+    L.marker([st.lat, st.lng], {icon: L.divIcon({className:'', html:`<div class="stdot${st.kind === 'portable' ? ' port' : ''}" style="--c:${col}"></div>`,
+      iconSize:[34,34], iconAnchor:[17,17], popupAnchor:[0,-10]}), title: st.name, keyboard:true, zIndexOffset:-100})
       .bindPopup(() => stPopup(st, stData.positionsAt), {minWidth:210}).addTo(stLayer);
   }
 }
