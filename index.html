@@ -88,6 +88,31 @@
   .stdot::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px #222,0 1px 3px rgba(0,0,0,.6)}
   .stdot.port::before{border-style:dashed}
   .stkey{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:#444;margin-top:4px}.stkey i{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #555;vertical-align:-1px;margin-right:3px}
+  /* my location: blue dot, white ring, black outline and a pulsing halo, so it shows on dark bush and pale ground */
+  .medot{width:22px;height:22px;border-radius:50%;background:#1e88ff;border:3px solid #fff;box-sizing:border-box;position:relative;
+         box-shadow:0 0 0 2px #000,0 0 10px 3px rgba(0,0,0,.55);cursor:pointer}
+  .medot::after{content:"";position:absolute;inset:-14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px #1e88ff;
+         animation:mepulse 1.8s ease-out infinite;pointer-events:none}
+  @keyframes mepulse{0%{transform:scale(.35);opacity:1}100%{transform:scale(1.3);opacity:0}}
+  @media (prefers-reduced-motion:reduce){.medot::after{animation:none;transform:scale(.8);opacity:.7}}
+  .pinpop .pc b{font-weight:800;color:#000}
+  .pinpop .edbtn{background:none;border:none;color:#1a5fd0;padding:0;margin:-2px 0 6px;font-size:12px;cursor:pointer;text-decoration:underline}
+  .pinpop .edit{margin:0 0 8px}.pinpop .edit .r{display:flex;gap:4px}
+  .pinpop .edit input{flex:1;min-width:0;font:16px system-ui,sans-serif;padding:4px 6px}
+  .pinpop .edit button{font-size:13px;padding:4px 10px;border:1px solid #1a5fd0;background:#1a5fd0;color:#fff;border-radius:4px;cursor:pointer}
+  .pinpop .edit .err{color:#c8102e;font-size:11px;margin-top:3px}
+  .pinpop .savebtn{width:100%;margin:0 0 6px;font-size:13px;padding:6px;border:1px solid #1a5fd0;background:#1a5fd0;color:#fff;border-radius:4px;cursor:pointer;font-weight:600}
+  .pinpop .stats{margin:6px 0;line-height:1.5}.pinpop .stats b{font-size:14px}
+  .pinpop .meta{color:#666;font-size:11px;margin-bottom:6px}
+  #tracebar{position:absolute;z-index:1002;left:10px;bottom:72px;width:min(400px,calc(100vw - 40px));box-sizing:border-box;background:#fff;color:#222;
+            border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.35);padding:8px 10px;font-size:13px;border-left:5px solid #00b8d4}
+  #tracebar .tst{font-weight:700}#tracebar .tsub{color:#444;font-size:12px;margin:2px 0 6px;line-height:1.4}
+  #tracebar .tsub .warn{color:#b26a00}
+  #tracebar .tb{display:flex;gap:4px}#tracebar .tb button{flex:1;font-size:13px;padding:7px 2px;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;cursor:pointer}
+  #tracebar .tb button.pri{background:#00838f;border-color:#00838f;color:#fff;font-weight:600}
+  #tracebar .tb button:disabled{opacity:.45}
+  #shapelist div{display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px}
+  #shapelist span.sw{width:10px;height:10px;border:2px solid #00b8d4;background:rgba(0,229,255,.25);flex:none}
   .fcdot{width:14px;height:14px;border-radius:50%;background:#c8102e;border:3px solid #fff;box-shadow:0 0 4px #000;box-sizing:border-box}
   /* Key gate: nothing shows until a working access key is saved on this device */
   #gate{display:none;position:fixed;inset:0;z-index:9999;background:#111;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
@@ -119,9 +144,11 @@
   <input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="Address, lat/long or MGA55 E N">
   <button id="go" title="Search">🔍</button>
   <button id="pinmode" title="Drop a pin: tap this, then tap the map (or long-press / right-click the map)">📍</button>
-  <button id="locate" title="Show my location">🎯</button>
+  <button id="locate" title="Show my location (tap again to stop)">🎯</button>
   <button id="fcmode" title="Fire weather forecast: tap this, then tap a place on the map">🌦</button>
+  <button id="tracebtn" title="Trace an area: walk its edge and GPS draws the shape">👣</button>
 </div>
+<div id="tracebar" hidden></div>
 <div id="fcsheet" hidden></div>
 <div class="panel" id="panel">
   <h1>Tasmania AFDRS Dashboard<span class="unoff">(Bootleg/Unofficial)</span></h1>
@@ -198,6 +225,8 @@
   <div class="stkey"><span><i style="background:#37474f"></i>BoM</span><span><i style="background:#c8102e"></i>TFS</span><span><i style="background:#2e7d32"></i>Parks</span></div>
   <label>Pins <button id="clearpins" style="float:right;font-size:11px;padding:1px 6px;cursor:pointer">Clear all</button></label>
   <div id="pinlist" class="small">No pins yet — long-press the map or use 📍.</div>
+  <label>Traced areas <button id="clearshapes" style="float:right;font-size:11px;padding:1px 6px;cursor:pointer">Clear all</button></label>
+  <div id="shapelist" class="small">None yet — tap 👣 and walk the edge.</div>
   <label>Load PNG from file</label>
   <input type="file" id="file" accept="image/png,image/*" style="width:100%;font-size:12px">
   <div class="small" id="status">Loading overlay…</div>
@@ -693,7 +722,9 @@ const mgaFwd = (() => {
     return [5e5 + k0*A*et, 1e7 + k0*A*xi];
   };
 })();
-const fmtMGA = (lat, lng) => { const [E,N] = mgaFwd(lat,lng); return `MGA55 E ${Math.round(E)} N ${Math.round(N)}`; };
+// MGA55 as HTML, with the 8-figure grid reference digits in bold (used in innerHTML only)
+const fmtMGA = (lat, lng) => { const [E,N] = mgaFwd(lat,lng), e = String(Math.round(E)).padStart(6,'0'), n = String(Math.round(N)).padStart(7,'0');
+  return `MGA55 E ${e[0]}<b>${e.slice(1,5)}</b>${e.slice(5)} N ${n.slice(0,2)}<b>${n.slice(2,6)}</b>${n.slice(6)}`; };
 
 // "-42.88, 147.33" · "42.88S 147.33E" · "147.33 -42.88" · "525000 5250000" · "55G 525000E 5250000N" -> {lat,lng} or null
 function parseCoords(s){
@@ -774,6 +805,34 @@ async function borrowSample(d){
 const dayLabel = () => { const b = $('days').querySelector('.on'); const t = b ? b.textContent : 'Today';
   return source === 'archive' && $('date').value ? `${t}, issued ${$('date').value}` : t; };
 
+// Coordinates as text, shared by pins, my location and traced areas.
+// The bold digits are the 8-figure grid reference (10 m): easting digits 2–5 and northing digits 3–6.
+function mgaParts(lat, lng){ const [E,N] = mgaFwd(lat, lng); return [String(Math.round(E)).padStart(6,'0'), String(Math.round(N)).padStart(7,'0')]; }
+function coordHTML(lat, lng){ const [e,n] = mgaParts(lat, lng);
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}<br><span title="Bold: 8-figure grid reference ${e.slice(1,5)} ${n.slice(2,6)}">MGA55 E ${e[0]}<b>${e.slice(1,5)}</b>${e.slice(5)} N ${n.slice(0,2)}<b>${n.slice(2,6)}</b>${n.slice(6)}</span>`; }
+function coordText(lat, lng){ const [e,n] = mgaParts(lat, lng);
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}\nMGA55 E ${e} N ${n}\nGrid ref (8-fig) ${e.slice(1,5)} ${n.slice(2,6)}`; }
+async function copyText(btn, t){ try { await navigator.clipboard.writeText(t); btn.textContent = 'Copied'; } catch(e){ prompt('Copy:', t); } }
+// what3words can only turn coordinates into 3 words through its paid API, so this copies the
+// coordinates and opens what3words, where they can be pasted into its search.
+function w3wLink(lat, lng){
+  const a = document.createElement('a'); a.textContent = '///'; a.href = 'https://what3words.com/'; a.target = '_blank'; a.rel = 'noopener';
+  a.title = 'what3words: copies these coordinates and opens what3words. Paste them into its search for the 3 words.';
+  a.onclick = () => { try { navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`).catch(() => {}); } catch(e){}
+    statusEl.textContent = 'Coordinates copied. Paste them into the what3words search to get the 3 words.'; };
+  return a;
+}
+function mapsLink(lat, lng){ const gm = document.createElement('a'); gm.textContent = 'Maps'; gm.target = '_blank'; gm.rel = 'noopener';
+  gm.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`; return gm; }
+function fdrEl(lat, lng){
+  const fdr = document.createElement('div'); fdr.className = 'fdr';
+  const r = fdrAt(lat, lng);
+  if(r && r[2]) fdr.innerHTML = `FDR (${dayLabel()}): <b style="background:${r[2]};color:${r[0]==='Catastrophic'?'#fff':'#222'}">${r[0]}</b>`;
+  else if(r) fdr.textContent = `FDR (${dayLabel()}): ${r[0]}`;
+  else fdr.textContent = borrowing ? 'Reading the rating…' : 'Rating not available here.';
+  return fdr;
+}
+
 // Pins (remembered in this browser)
 const PINKEY = 'tfsPins';
 let pins = ls.get(PINKEY) || [];
@@ -786,25 +845,31 @@ function popupFor(pin){
   const name = document.createElement('input'); name.value = pin.name; name.placeholder = 'Pin name';
   name.onchange = () => { pin.name = name.value.trim() || 'Pin'; savePins(); listPins(); };
   const pc = document.createElement('div'); pc.className = 'pc';
-  pc.innerHTML = `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}<br>${fmtMGA(pin.lat, pin.lng)}`;
-  const fdr = document.createElement('div'); fdr.className = 'fdr';
-  const r = fdrAt(pin.lat, pin.lng);
-  if(r && r[2]) fdr.innerHTML = `FDR (${dayLabel()}): <b style="background:${r[2]};color:${r[0]==='Catastrophic'?'#fff':'#222'}">${r[0]}</b>`;
-  else if(r) fdr.textContent = `FDR (${dayLabel()}): ${r[0]}`;
-  else fdr.textContent = borrowing ? 'Reading the rating…'
-    : 'Rating not available here. In Live mode, enter an archive access key (Source → Archive) and pins will show ratings.';
+  pc.innerHTML = coordHTML(pin.lat, pin.lng);
+  // Edit coordinates: any form the search box takes (lat/long or MGA55)
+  const ed = document.createElement('button'); ed.type = 'button'; ed.className = 'edbtn'; ed.textContent = 'Edit coordinates';
+  const ebox = document.createElement('div'); ebox.className = 'edit'; ebox.hidden = true;
+  ebox.innerHTML = '<div class="r"><input type="text" autocomplete="off" aria-label="New coordinates"><button type="button">Move</button></div><div class="err"></div>';
+  const ein = ebox.querySelector('input'), emove = ebox.querySelector('button'), eerr = ebox.querySelector('.err');
+  ein.value = `${pin.lat.toFixed(6)}, ${pin.lng.toFixed(6)}`; ein.placeholder = 'lat, long  or  MGA55 E N';
+  ed.onclick = () => { ebox.hidden = false; ed.hidden = true; ein.focus(); ein.select(); };
+  const doMove = () => { const c = parseCoords(ein.value);
+    if(!c){ eerr.textContent = 'Couldn’t read that. Try -42.88123, 147.32456 or 525123 5250123.'; return; }
+    pin.lat = c.lat; pin.lng = c.lng; savePins(); const m = markers.get(pin.id);
+    if(m){ m.setLatLng([c.lat, c.lng]); map.panTo([c.lat, c.lng]); }
+    refreshPins(); if(m && !m.isPopupOpen()) m.openPopup(); };
+  emove.onclick = doMove; ein.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); doMove(); } };
+  const fdr = fdrEl(pin.lat, pin.lng), r = fdrAt(pin.lat, pin.lng);
   if(r && sample && sample.note){ const n = document.createElement('div'); n.style.cssText = 'color:#666;font-size:11px;margin:-4px 0 8px'; n.textContent = sample.note; el._note = n; }
   const pb = document.createElement('div'); pb.className = 'pb';
   const copy = document.createElement('button'); copy.textContent = 'Copy';
-  copy.onclick = async () => { const t = `${pin.name}\n${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}\n${fmtMGA(pin.lat, pin.lng)}`;
-    try { await navigator.clipboard.writeText(t); copy.textContent = 'Copied'; } catch(e){ prompt('Copy:', t); } };
-  const gm = document.createElement('a'); gm.textContent = 'Maps'; gm.target = '_blank'; gm.rel = 'noopener';
-  gm.href = `https://www.google.com/maps/search/?api=1&query=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}`;
+  copy.onclick = () => copyText(copy, `${pin.name}\n${coordText(pin.lat, pin.lng)}`);
+  const gm = mapsLink(pin.lat, pin.lng);
   const del = document.createElement('button'); del.textContent = 'Delete';
   del.onclick = () => removePin(pin.id);
   const fc = document.createElement('button'); fc.className = 'fcbtn'; fc.textContent = '🌦 4-day fire weather forecast';
   fc.onclick = () => { map.closePopup(); showForecast(pin.lat, pin.lng, pin.name); };
-  pb.append(copy, gm, del); el.append(name, pc, fdr, fc, pb);
+  pb.append(copy, gm, w3wLink(pin.lat, pin.lng), del); el.append(name, pc, ed, ebox, fdr, fc, pb);
   if(el._note) el.insertBefore(el._note, pb);
   L.DomEvent.disableClickPropagation(el);
   return el;
@@ -881,24 +946,266 @@ $('q').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefaul
 $('q').addEventListener('input', () => { if(!$('q').value) results.innerHTML = ''; });
 [ $('searchbar'), results ].forEach(el => { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); });
 
-// My location
-let locLayer = null;
+/* ---------- GPS: my location and area tracing ----------
+   One shared watchPosition serves both. 🎯 toggles "my location" (a high-contrast dot you can tap for
+   coordinates or to save a pin). 👣 traces an area: walk its edge and the path is recorded, then
+   Finish closes it into a shape with area, perimeter and centre. An unfinished trace is kept in this
+   browser, so a reload or a dropped page doesn't lose it.                                            */
+const geo = {id: null, users: new Set(), last: null};
+function geoUse(who, on){
+  if(on) geo.users.add(who); else geo.users.delete(who);
+  if(geo.users.size && geo.id === null && navigator.geolocation)
+    geo.id = navigator.geolocation.watchPosition(onFix, onGeoErr, {enableHighAccuracy: true, maximumAge: 0, timeout: 30000});
+  if(!geo.users.size && geo.id !== null){ navigator.geolocation.clearWatch(geo.id); geo.id = null; }
+}
+const fmtTime = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+const fmtHM = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+
+// The location marker
+let meMarker = null, meCircle = null, meFirst = false, locOn = false;
+const meIcon = L.divIcon({className: '', html: '<div class="medot"></div>', iconSize: [22,22], iconAnchor: [11,11], popupAnchor: [0,-14]});
+function showMe(p){
+  const ll = [p.coords.latitude, p.coords.longitude], acc = p.coords.accuracy;
+  if(!meMarker){
+    meCircle = L.circle(ll, {radius: acc, color: '#1e88ff', weight: 1, fillOpacity: .08, interactive: false}).addTo(map);
+    meMarker = L.marker(ll, {icon: meIcon, zIndexOffset: 2000, title: 'My location: tap for coordinates'}).addTo(map);
+    meMarker.bindPopup(mePopup, {minWidth: 210});
+  } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(acc); }
+}
+function hideMe(){ if(meMarker){ map.removeLayer(meMarker); map.removeLayer(meCircle); meMarker = meCircle = null; } }
+function mePopup(){
+  const el = document.createElement('div'), p = geo.last; el.className = 'pinpop';
+  if(!p){ el.textContent = 'Waiting for a GPS fix…'; return el; }
+  const lat = p.coords.latitude, lng = p.coords.longitude;
+  const h = document.createElement('div');
+  h.innerHTML = `<b style="font-size:13px">My location</b> <span style="color:#666">±${Math.round(p.coords.accuracy)} m · ${fmtTime(p.timestamp)}</span>`;
+  const pc = document.createElement('div'); pc.className = 'pc'; pc.innerHTML = coordHTML(lat, lng);
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'savebtn'; save.textContent = '📍 Save a pin here';
+  save.onclick = () => { map.closePopup(); addPin(lat, lng, `My location ${fmtHM(p.timestamp)}`); };
+  const fc = document.createElement('button'); fc.className = 'fcbtn'; fc.textContent = '🌦 4-day fire weather forecast';
+  fc.onclick = () => { map.closePopup(); showForecast(lat, lng, 'My location'); };
+  const pb = document.createElement('div'); pb.className = 'pb';
+  const copy = document.createElement('button'); copy.textContent = 'Copy';
+  copy.onclick = () => copyText(copy, `My location (±${Math.round(p.coords.accuracy)} m, ${fmtTime(p.timestamp)})\n${coordText(lat, lng)}`);
+  pb.append(copy, mapsLink(lat, lng), w3wLink(lat, lng));
+  el.append(h, pc, fdrEl(lat, lng), save, fc, pb);
+  L.DomEvent.disableClickPropagation(el);
+  return el;
+}
+function onFix(p){
+  geo.last = p; showMe(p);
+  const ll = [p.coords.latitude, p.coords.longitude];
+  if(meFirst){
+    meFirst = false; map.setView(ll, Math.max(map.getZoom(), 15));
+    const r = fdrAt(ll[0], ll[1]);
+    statusEl.textContent = `You are here (±${Math.round(p.coords.accuracy)} m)` + (r && r[2] ? ` — FDR ${r[0]} (${dayLabel()})` : '')
+      + '. Tap the blue dot for coordinates or to save a pin.';
+  }
+  if(trace && !trace.paused){
+    traceFix(p);
+    if(!trace.zoomed){ trace.zoomed = true; if(map.getZoom() < 16) map.setView(ll, 17); }   // close enough to see the edge
+    if(!map.getBounds().pad(-0.2).contains(ll)) map.panTo(ll);                     // keep the walker on screen
+  }
+}
+function onGeoErr(err){
+  if(err.code === 1){                                                              // permission refused: stop everything
+    statusEl.innerHTML = '<b style="color:#c8102e">Location permission was refused.</b> Allow location for this page in the browser settings.';
+    if(locOn){ locOn = false; $('locate').classList.remove('on'); geoUse('loc', false); }
+    if(trace && !trace.paused) tracePause(true);
+    if(!trace) hideMe();
+  } else if(trace && !trace.paused){ trace.note = 'Waiting for GPS…'; traceBar(); }
+  else if(locOn && !geo.last) statusEl.textContent = 'Still looking for a GPS fix. Move into the open if you can.';
+}
 $('locate').onclick = () => {
   if(!navigator.geolocation){ statusEl.textContent = 'Location isn’t available in this browser.'; return; }
-  $('locate').classList.add('on');
-  navigator.geolocation.getCurrentPosition(pos => {
-    $('locate').classList.remove('on');
-    const ll = [pos.coords.latitude, pos.coords.longitude], acc = pos.coords.accuracy;
-    if(locLayer) map.removeLayer(locLayer);
-    locLayer = L.layerGroup([L.circle(ll, {radius:acc, color:'#1a73e8', weight:1, fillOpacity:.1}),
-                             L.circleMarker(ll, {radius:7, color:'#fff', weight:2, fillColor:'#1a73e8', fillOpacity:1})]).addTo(map);
-    map.setView(ll, Math.max(map.getZoom(), 13));
-    const r = fdrAt(ll[0], ll[1]);
-    statusEl.innerHTML = '';
-    statusEl.textContent = `You are here (±${Math.round(acc)} m)` + (r && r[2] ? ` — FDR ${r[0]} (${dayLabel()})` : '') + '. Long-press to pin it.';
-  }, err => { $('locate').classList.remove('on'); statusEl.innerHTML = `<b style="color:#c8102e">Couldn’t get your location</b> (${err.message}).`; },
-     {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
+  locOn = !locOn; $('locate').classList.toggle('on', locOn);
+  if(locOn){
+    meFirst = true; statusEl.textContent = 'Finding your location…'; geoUse('loc', true);
+    if(geo.last && Date.now() - geo.last.timestamp < 30000) onFix(geo.last);
+  } else {
+    geoUse('loc', false); if(!trace || trace.paused) hideMe();
+    statusEl.textContent = 'Location off.';
+  }
 };
+
+/* ---------- Traced areas ---------- */
+const SHAPEKEY = 'afdrsShapes', TRACEKEY = 'afdrsTrace';
+const MAXACC = 20, MINSTEP = 3;              // skip fixes worse than ±20 m; ignore moves under 3 m (GPS jitter)
+let shapes = ls.get(SHAPEKEY) || [], trace = null, wake = null;
+const saveShapes = () => ls.set(SHAPEKEY, shapes);
+const saveTrace = () => trace ? ls.set(TRACEKEY, {pts: trace.pts, gaps: trace.gaps, started: trace.started}) : ls.del(TRACEKEY);
+const shapeLayer = L.layerGroup().addTo(map), shapeLayers = new Map();
+const TRACE_COL = '#00e5ff', TRACE_CASE = '#003840';
+const traceCase = L.polyline([], {color: TRACE_CASE, weight: 8, opacity: .8, interactive: false});
+const traceLine = L.polyline([], {color: TRACE_COL, weight: 4, opacity: 1, interactive: false});
+const traceClose = L.polyline([], {color: TRACE_COL, weight: 2, dashArray: '6 6', interactive: false});
+const haversine = (a, b) => { const R = 6371008.8, r = Math.PI/180, dLa = (b[0]-a[0])*r, dLo = (b[1]-a[1])*r;
+  const h = Math.sin(dLa/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2; return 2*R*Math.asin(Math.sqrt(h)); };
+const walked = pts => pts.reduce((s, p, i) => i ? s + haversine(pts[i-1], p) : 0, 0);
+const fmtLen = m => m < 1000 ? `${Math.round(m)} m` : `${(m/1000).toFixed(2)} km`;
+const fmtArea = a => a < 10000 ? `${Math.round(a).toLocaleString()} m² (${(a/10000).toFixed(2)} ha)`
+                               : `${(a/10000).toFixed(2)} ha (${Math.round(a).toLocaleString()} m²)`;
+
+// Area, perimeter and centre, worked out on the MGA55 grid and corrected to ground distance with the
+// grid scale factor at the centre (a few hundredths of a percent in Tasmania).
+function shapeStats(pts){
+  const P = pts.map(([la, lo]) => mgaFwd(la, lo)), ox = P[0][0], oy = P[0][1], n = P.length;
+  let A = 0, cx = 0, cy = 0, Lg = 0;
+  for(let i = 0; i < n; i++){
+    const x1 = P[i][0]-ox, y1 = P[i][1]-oy, x2 = P[(i+1)%n][0]-ox, y2 = P[(i+1)%n][1]-oy, c = x1*y2 - x2*y1;
+    A += c; cx += (x1+x2)*c; cy += (y1+y2)*c; Lg += Math.hypot(x2-x1, y2-y1);
+  }
+  A /= 2;
+  if(Math.abs(A) > 1e-6){ cx = cx/(6*A) + ox; cy = cy/(6*A) + oy; }
+  else { cx = P.reduce((s, p) => s + p[0], 0)/n; cy = P.reduce((s, p) => s + p[1], 0)/n; }
+  const k = 0.9996*(1 + (cx - 5e5)**2/(2*6371000**2));
+  return {area: Math.abs(A)/(k*k), perim: Lg/k, c: mgaInv(cx, cy)};
+}
+
+async function wakeOn(){ try { if(navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch(e){ wake = null; } }
+function wakeOff(){ try { if(wake) wake.release(); } catch(e){} wake = null; }
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && trace && !trace.paused){ wakeOn(); }
+});
+
+function traceDraw(){
+  const ll = trace ? trace.pts.map(p => [p[0], p[1]]) : [];
+  traceCase.setLatLngs(ll); traceLine.setLatLngs(ll);
+  traceClose.setLatLngs(ll.length > 2 ? [ll[ll.length-1], ll[0]] : []);
+}
+function traceBar(){
+  const bar = $('tracebar');
+  if(!trace){ bar.hidden = true; bar.innerHTML = ''; return; }
+  const n = trace.pts.length, p = geo.last, acc = p ? Math.round(p.coords.accuracy) : null;
+  let sub = `${n} point${n === 1 ? '' : 's'} · ${fmtLen(walked(trace.pts))} walked`;
+  if(!trace.paused) sub += acc !== null ? ` · GPS ±${acc} m` : ' · waiting for GPS…';
+  if(n > 2){ const st = shapeStats(trace.pts.map(q => [q[0], q[1]])); sub += `<br>If closed now: ${fmtArea(st.area)}, perimeter ${fmtLen(st.perim)}`; }
+  if(!trace.paused && acc !== null && acc > MAXACC) sub += `<br><span class="warn">Weak GPS (±${acc} m): points are skipped until it’s ±${MAXACC} m or better.</span>`;
+  if(trace.gaps) sub += `<br><span class="warn">${trace.gaps} gap${trace.gaps === 1 ? '' : 's'} where GPS stopped; the edge there is a straight line.</span>`;
+  if(trace.note) sub += `<br><span class="warn">${String(trace.note).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</span>`;
+  if(!trace.paused) sub += '<br>Keep this page open with the screen on' + (navigator.wakeLock ? '.' : ' (turn off auto-lock if it sleeps).');
+  bar.innerHTML = `<div class="tst">${trace.paused ? '⏸ Trace paused' : '👣 Tracing: walk the edge'}</div><div class="tsub">${sub}</div>
+    <div class="tb"><button type="button" id="trpause">${trace.paused ? '▶ Resume' : '⏸ Pause'}</button>
+    <button type="button" id="trpoint" ${trace.paused ? 'disabled' : ''} title="Add your current position now (e.g. at a corner)">+ Point</button>
+    <button type="button" id="trfinish" class="pri">✓ Finish</button>
+    <button type="button" id="trcancel">✕ Cancel</button></div>`;
+  bar.hidden = false;
+}
+function traceAdd(p, force){
+  const pt = [p.coords.latitude, p.coords.longitude, Math.round(p.coords.accuracy), p.timestamp];
+  const last = trace.pts[trace.pts.length-1];
+  if(!force){
+    if(pt[2] > MAXACC) return;
+    if(last && haversine(last, pt) < MINSTEP) return;
+  }
+  if(last && pt[3] - last[3] > 30000 && haversine(last, pt) > 15) trace.gaps++;       // GPS stopped for a while
+  trace.pts.push(pt); saveTrace(); traceDraw();
+}
+function traceFix(p){ trace.note = ''; traceAdd(p, false); traceBar(); }
+function traceStart(){
+  if(!navigator.geolocation){ statusEl.textContent = 'Location isn’t available in this browser.'; return; }
+  trace = {pts: [], gaps: 0, started: Date.now(), paused: false, note: ''};
+  [traceCase, traceLine, traceClose].forEach(l => l.addTo(map));
+  $('tracebtn').classList.add('on'); saveTrace(); traceResume();
+}
+function traceResume(){
+  trace.paused = false; trace.lastResume = Date.now(); trace.zoomed = false; geoUse('trace', true); wakeOn();
+  if(trace.pts.length > 1){ map.fitBounds(traceLine.getBounds(), {padding: [60, 60], maxZoom: 18}); trace.zoomed = true; }
+  if(geo.last && Date.now() - geo.last.timestamp < 10000) onFix(geo.last);
+  traceBar();
+}
+function tracePause(quiet){
+  trace.paused = true; geoUse('trace', false); wakeOff();
+  if(!locOn) hideMe();
+  if(!quiet) trace.note = '';
+  traceBar();
+}
+function traceEnd(){
+  geoUse('trace', false); wakeOff(); trace = null; saveTrace(); traceDraw();
+  [traceCase, traceLine, traceClose].forEach(l => map.removeLayer(l));
+  $('tracebtn').classList.remove('on'); traceBar(); if(!locOn) hideMe();
+}
+function traceFinish(){
+  if(trace.pts.length < 3){ trace.note = 'Need at least 3 points to make an area. Keep walking, or Cancel.'; traceBar(); return; }
+  const pts = trace.pts.map(p => [+p[0].toFixed(7), +p[1].toFixed(7)]), st = shapeStats(pts);
+  const shape = {id: Date.now().toString(36), name: `Area ${shapes.length + 1}`, pts, area: st.area, perim: st.perim, c: st.c,
+                 t: trace.started, gaps: trace.gaps};
+  shapes.push(shape); saveShapes(); traceEnd(); drawShape(shape); listShapes();
+  const lay = shapeLayers.get(shape.id); map.fitBounds(lay.poly.getBounds(), {padding: [40, 40], maxZoom: 18}); lay.poly.openPopup(st.c);
+}
+$('tracebtn').onclick = () => {
+  if(trace){ $('tracebar').scrollIntoView({block: 'nearest'}); return; }
+  traceStart();
+};
+$('tracebar').addEventListener('click', e => {
+  const id = e.target.id; if(!trace) return;
+  if(id === 'trpause'){ trace.paused ? traceResume() : tracePause(); }
+  if(id === 'trpoint'){
+    if(geo.last && Date.now() - geo.last.timestamp < 15000){ traceAdd(geo.last, true); trace.note = `Point added (±${Math.round(geo.last.coords.accuracy)} m).`; }
+    else trace.note = 'No recent GPS fix to add yet.';
+    traceBar();
+  }
+  if(id === 'trfinish') traceFinish();
+  if(id === 'trcancel' && (trace.pts.length < 3 || confirm(`Discard this trace (${trace.pts.length} points)?`))) traceEnd();
+});
+L.DomEvent.disableClickPropagation($('tracebar')); L.DomEvent.disableScrollPropagation($('tracebar'));
+
+function shapePopup(shape){
+  const el = document.createElement('div'); el.className = 'pinpop';
+  const name = document.createElement('input'); name.value = shape.name; name.placeholder = 'Area name';
+  name.onchange = () => { shape.name = name.value.trim() || 'Area'; saveShapes(); listShapes(); };
+  const stats = document.createElement('div'); stats.className = 'stats';
+  stats.innerHTML = `Area <b>${fmtArea(shape.area)}</b><br>Perimeter <b>${fmtLen(shape.perim)}</b>`;
+  const pc = document.createElement('div'); pc.className = 'pc'; pc.innerHTML = `<span style="color:#666">Centre</span><br>${coordHTML(shape.c[0], shape.c[1])}`;
+  const meta = document.createElement('div'); meta.className = 'meta';
+  meta.textContent = `${shape.pts.length} points · traced ${new Date(shape.t).toLocaleString([], {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}`
+    + (shape.gaps ? ` · ${shape.gaps} GPS gap${shape.gaps === 1 ? '' : 's'}` : '');
+  const fc = document.createElement('button'); fc.className = 'fcbtn'; fc.textContent = '🌦 4-day fire weather forecast';
+  fc.onclick = () => { map.closePopup(); showForecast(shape.c[0], shape.c[1], shape.name); };
+  const pb = document.createElement('div'); pb.className = 'pb';
+  const copy = document.createElement('button'); copy.textContent = 'Copy';
+  copy.onclick = () => copyText(copy, `${shape.name}\nArea ${fmtArea(shape.area)}\nPerimeter ${fmtLen(shape.perim)}\nCentre ${coordText(shape.c[0], shape.c[1])}`);
+  const del = document.createElement('button'); del.textContent = 'Delete';
+  del.onclick = () => { if(confirm(`Delete ${shape.name}?`)) removeShape(shape.id); };
+  pb.append(copy, mapsLink(shape.c[0], shape.c[1]), w3wLink(shape.c[0], shape.c[1]), del);
+  el.append(name, stats, pc, meta, fdrEl(shape.c[0], shape.c[1]), fc, pb);
+  L.DomEvent.disableClickPropagation(el);
+  return el;
+}
+function drawShape(shape){
+  const poly = L.polygon(shape.pts, {color: TRACE_COL, weight: 3, fillColor: TRACE_COL, fillOpacity: .18}).addTo(shapeLayer);
+  const casing = L.polygon(shape.pts, {color: TRACE_CASE, weight: 6, fill: false, interactive: false}).addTo(shapeLayer);
+  casing.bringToBack();
+  const dot = L.circleMarker(shape.c, {radius: 5, color: '#fff', weight: 2, fillColor: TRACE_CASE, fillOpacity: 1}).addTo(shapeLayer);
+  poly.bindPopup(() => shapePopup(shape), {minWidth: 210}); dot.on('click', () => poly.openPopup(shape.c));
+  shapeLayers.set(shape.id, {poly, casing, dot});
+}
+function removeShape(id){
+  shapes = shapes.filter(s => s.id !== id); saveShapes();
+  const l = shapeLayers.get(id); if(l){ [l.poly, l.casing, l.dot].forEach(x => shapeLayer.removeLayer(x)); shapeLayers.delete(id); }
+  map.closePopup(); listShapes();
+}
+function listShapes(){
+  const el = $('shapelist'); el.innerHTML = '';
+  if(!shapes.length){ el.textContent = 'None yet — tap 👣 and walk the edge.'; return; }
+  for(const s of shapes){
+    const row = document.createElement('div'), sw = document.createElement('span'), t = document.createElement('span');
+    sw.className = 'sw'; t.textContent = `${s.name} — ${(s.area/10000).toFixed(2)} ha`;
+    row.append(sw, t);
+    row.onclick = () => { const l = shapeLayers.get(s.id); map.fitBounds(l.poly.getBounds(), {padding: [40, 40], maxZoom: 18}); l.poly.openPopup(s.c); };
+    el.append(row);
+  }
+}
+$('clearshapes').onclick = () => { if(!shapes.length || !confirm(`Delete all ${shapes.length} traced areas?`)) return;
+  shapeLayer.clearLayers(); shapeLayers.clear(); shapes = []; saveShapes(); listShapes(); };
+shapes.forEach(drawShape); listShapes();
+// An unfinished trace from before a reload comes back paused
+try { const saved = ls.get(TRACEKEY);
+  if(saved && saved.pts && saved.pts.length){
+    trace = {pts: saved.pts, gaps: saved.gaps || 0, started: saved.started || Date.now(), paused: true,
+             note: `Unfinished trace restored (${saved.pts.length} points). Resume, Finish or Cancel.`};
+    [traceCase, traceLine, traceClose].forEach(l => l.addTo(map)); traceDraw(); $('tracebtn').classList.add('on'); traceBar();
+  } } catch(e){ console.warn('Could not restore the unfinished trace', e); }
 
 /* ---------- Fire weather forecast at a point (4 days) ----------
    The collector saves TFS's Day 0-3 detailed fire weather forecast pages as JSON (fwf_latest.json and
