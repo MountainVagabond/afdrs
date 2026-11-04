@@ -1655,7 +1655,7 @@ new MutationObserver(() => omAttach()).observe(fcSheet, {childList: true});
    highlights the 🌦 panel for the same spot.                                                       */
 // New filters start blank and switched off. "Apply my defaults" fills in the user's saved defaults (this device);
 // "Restore original defaults" brings back FL_ORIGINAL. FL_ORIGINAL is a placeholder until Nick supplies his values.
-const FL_ORIGINAL = {temp: {max: 20}, rh: {min: 40}, wind: {max: 15}};
+const FL_ORIGINAL = {temp: {max: 20}, rh: {min: 40}, wind: {max: 15}, rain: {max: 0}};   // rain max 0 = only dry hours (Nick, 5 Nov)
 const FLDEFKEY = 'afdrsFilterDefaults';
 const FL_DEFAULT = () => ({lim: {}, active: false, tab: 'find', win: null});
 const flClone = x => JSON.parse(JSON.stringify(x || {}));
@@ -1750,7 +1750,7 @@ const FL_SHORT = {temp: 'Temp', rh: 'RH', wind: 'Wind', gust: 'Gust', rain: 'Rai
 const flShort = k => FL_SHORT[k] || ('FBI ' + k.replace('fuel:', ''));
 function flActive(f){ return Object.entries((f && f.lim) || {}).filter(([, v]) => v && (v.min != null || v.max != null)); }
 // Rain before / after a window: seq = {bH, bMin, bMax, aH, aMin, aMax, minRun} (hours default 24)
-function flSeqOn(f){ const q = f && f.seq; return !!q && ['bMin', 'bMax', 'aMin', 'aMax', 'minRun'].some(k => q[k] != null); }
+function flSeqOn(f){ const q = f && f.seq; return !!q && ['bMin', 'bMax', 'aMin', 'aMax'].some(k => q[k] != null); }   // minRun alone does nothing
 function flHasAny(f){ return flActive(f).length > 0 || flSeqOn(f); }
 function flSeqEval(filter, model, r){                               // r = {i0, i1, hours}; adds ok, why, before, after
   const h = model.data.hourly, P = h.precipitation || [], q = filter.seq || {};
@@ -1830,7 +1830,7 @@ function flSummary(pin, fd){
   const q = pin.filter.seq || {};
   if(q.bMin != null || q.bMax != null) parts.push(`Rain in ${q.bH || 24} h before ${q.bMin != null && q.bMax != null ? `${q.bMin}–${q.bMax}` : q.bMin != null ? '≥ ' + q.bMin : '≤ ' + q.bMax} mm`);
   if(q.aMin != null || q.aMax != null) parts.push(`Rain in ${q.aH || 24} h after ${q.aMin != null && q.aMax != null ? `${q.aMin}–${q.aMax}` : q.aMin != null ? '≥ ' + q.aMin : '≤ ' + q.aMax} mm`);
-  if(q.minRun != null) parts.push(`Window ≥ ${q.minRun} h`);
+  if(flSeqOn(pin.filter) && q.minRun > 1) parts.push(`Window ≥ ${q.minRun} h`);
   return parts.length ? parts.map(esc).join(' · ') : 'none set';
 }
 let flCondOpen = false;
@@ -1840,10 +1840,11 @@ function flSeqHTML(pin){
     <table class="fllim"><thead><tr><th></th><th>Hours</th><th>Min mm</th><th>Max mm</th></tr></thead><tbody>
       <tr><td>Total rain in the hours <b>before</b></td><td>${inp('bH', '24', 'numeric')}</td><td>${inp('bMin', '—')}</td><td>${inp('bMax', '—')}</td></tr>
       <tr><td>Total rain in the hours <b>after</b></td><td>${inp('aH', '24', 'numeric')}</td><td>${inp('aMin', '—')}</td><td>${inp('aMax', '—')}</td></tr>
-      <tr><td>Window at least (hours)</td><td>${inp('minRun', '—', 'numeric')}</td><td colspan="2"></td></tr></tbody></table>
-    <div class="flnote">A <b>window</b> is a run of consecutive hours meeting every condition above. It qualifies only if the rain totals
-      just before and just after it are within these limits. Hours: 1–72 (blank = 24). Rain is the model’s; hours before now are its
-      estimate for the last 3 days, not rain-gauge readings.</div></div>`;
+      <tr><td>Window at least (hours)</td><td>${inp('minRun', '1', 'numeric')}</td><td colspan="2"></td></tr></tbody></table>
+    <div class="flnote">This box does nothing until a <b>Min or Max mm</b> is entered. A <b>window</b> is a run of consecutive hours meeting
+      every condition above; it qualifies only if the rain totals just before and just after it are within these limits, and it is at least
+      the length given. <b>Grey numbers are the defaults used when a box is empty</b> (24 h before/after, window 1 h; hours 1–72).
+      Rain is the model’s; hours before now are its estimate for the last 3 days, not rain-gauge readings.</div></div>`;
 }
 function flAfterEdit(pin){
   if(!flHasAny(pin.filter) && pin.filter.active){ pin.filter.active = false; refreshPins(); }
@@ -1947,7 +1948,7 @@ function flResults(){
     ${seqOn ? `<div class="flseqres">${(() => { const q = f.seq || {}, out = [];
       if(q.bMin != null || q.bMax != null) out.push(`<span class="${sq.before == null ? 'flm' : flOut(sq.before, {min: q.bMin, max: q.bMax}) ? 'omx' : 'omok'}">Rain in the ${q.bH || 24} h before: <b>${sq.before == null ? '–' : sq.before + ' mm'}</b></span>`);
       if(q.aMin != null || q.aMax != null) out.push(`<span class="${sq.after == null ? 'flm' : flOut(sq.after, {min: q.aMin, max: q.aMax}) ? 'omx' : 'omok'}">Rain in the ${q.aH || 24} h after: <b>${sq.after == null ? '–' : sq.after + ' mm'}</b></span>`);
-      if(q.minRun != null) out.push(`<span class="${hrs.length < q.minRun ? 'omx' : 'omok'}">Length ${hrs.length} h (needs ≥ ${q.minRun})</span>`);
+      if(q.minRun > 1) out.push(`<span class="${hrs.length < q.minRun ? 'omx' : 'omok'}">Length ${hrs.length} h (needs ≥ ${q.minRun})</span>`);
       return out.join(' '); })()}</div>` : ''}
     <table class="omt flt"><thead><tr><th>Time</th>${FL_HOUR.map(x => `<th>${esc(x[1].replace(' (10 m average)', '').replace('Humidity (RH) %', 'RH %').replace('Wind gusts km/h', 'Gust').replace('Rain mm in the hour', 'Rain mm').replace('Temperature °C', 'Temp °C'))}</th>`).join('')}<th></th></tr></thead><tbody>`;
   hrs.forEach((i, j) => { const e = ev[j], t = h.time[i];
