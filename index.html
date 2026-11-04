@@ -1401,10 +1401,13 @@ const flag = (v, red) => red ? `<span class="red" title="Over the weather alert 
 
 function fcRender(lat, lng, name, data, dist, lga){
   const days = (data.days || []).slice().sort((a, b) => a.day - b.day);
-  const dn = dist && dist.f.name, ln = lga && lga.f.name;
-  const D = days.map(d => (d.districts || {})[dn] || null);
+  const ln = lga && lga.f.name;
   const subFor = d => { for(const k of Object.keys(d.districts || {})){ const s = (d.districts[k].subs || []).find(s => normName(s.name) === normName(ln)); if(s) return {s, k}; } return null; };
   const S = ln ? days.map(subFor) : days.map(() => null);
+  // TFS definition of a district: the one the detailed fire weather forecast lists the council under.
+  // Only if the council can't be found is the district map boundary used instead.
+  const listed = (S.find(x => x) || {}).k, dn = listed || (dist && dist.f.name), dnFallback = !listed && !!dn;
+  const D = days.map(d => (d.districts || {})[dn] || null);
   const subName = (S.find(x => x) || {}).s?.name;
   const curCol = source === 'archive' ? -1 : day;                                    // Live: highlight the day shown on the map
   const td = (fn, i) => `<td${days[i] && days[i].day === curCol ? ' class="cur"' : ''}>${fn(i)}</td>`;
@@ -1413,20 +1416,20 @@ function fcRender(lat, lng, name, data, dist, lga){
   const W = i => D[i] && D[i].weather || {};
   let h = `<div class="fh"><div><h2>${esc(name || 'Fire weather forecast')}</h2>
     <div class="sub">${lat.toFixed(5)}, ${lng.toFixed(5)} · ${fmtMGA(lat, lng)}</div>
-    <div class="sub">District: <b>${esc(dn || 'not found')}</b>${dist && dist.km ? ` (nearest, ${dist.km.toFixed(1)} km)` : ''} · Council: <b>${esc(subName || ln || 'not found')}</b>${lga && lga.km ? ` (nearest, ${lga.km.toFixed(1)} km)` : ''}</div></div>
+    <div class="sub">Council: <b>${esc(subName || ln || 'not found')}</b>${lga && lga.km ? ` (nearest, ${lga.km.toFixed(1)} km)` : ''} · District: <b>${esc(dn ? dn + ' District' : 'not found')}</b>${dnFallback ? ' (council not found in the TFS forecast; district from the map boundary)' : ''}</div></div>
     <button type="button" id="fcclose" title="Close">✕</button></div><div class="fb">`;
   if(!days.length || !dn){
     h += `<p>${!days.length ? 'The saved forecast has no days in it.' : 'This spot isn’t inside a Tasmanian fire weather district.'}</p></div>`;
     fcSheet.innerHTML = h; return;
   }
   h += `<table><thead><tr><th></th>${days.map((d, i) => `<th${d.day === curCol ? ' class="cur"' : ''}>${shortDate(d.date, d.date_text)}</th>`).join('')}</tr></thead><tbody>`;
-  h += grp(`${esc(dn)} district`);
+  h += grp(`${esc(dn)} District`);
   h += row('Rating / FBI', i => D[i] ? rateHTML(D[i].rating, D[i].fbi) : '–');
-  if(subName){ h += grp(`${esc(subName)} (council sub-area${S.find(x => x) && S.find(x => x).k !== dn ? `, rated with ${esc(S.find(x => x).k)}` : ''})`);
+  if(subName){ h += grp(`${esc(subName)} (council sub-area)`);
     h += row('Rating / FBI', i => S[i] ? rateHTML(S[i].s.rating, S[i].s.fbi) : '–');
     h += row('cHaines', i => S[i] ? flag(S[i].s.cHaines, (S[i].s.red || []).includes('cHaines')) : '–');
     h += row('Wind change (WCDI)', i => S[i] ? flag(S[i].s.wcdi, (S[i].s.red || []).includes('wcdi')) : '–'); }
-  h += grp('Weather (district)');
+  h += grp(`Weather (${esc(dn)} District)`);
   h += row('Max temp °C', i => esc(W(i).temp ?? '–'));
   h += row('Min RH %', i => esc(W(i).rh ?? '–'));
   h += row('Wind km/h', i => W(i).windDir ? `${esc(W(i).windDir)} ${esc(W(i).windSpeed)}` : '–');
@@ -1440,7 +1443,7 @@ function fcRender(lat, lng, name, data, dist, lga){
   if(D.some(d => d && d.minorFuel)) h += row('Minor fuel ≥ Extreme', i => esc(D[i] && D[i].minorFuel || '–'));
   // Fuel types, in the order of the first day's coverage
   const fuels = ((D.find(d => d && d.fuels) || {}).fuels || []).filter(f => f.share == null || f.share > 0);
-  if(fuels.length){ h += grp('FBI by fuel type (district)');
+  if(fuels.length){ h += grp(`FBI by fuel type (${esc(dn)} District)`);
     for(const f of fuels) h += row(`${esc(f.type)}${f.share != null ? ` <span style="font-weight:400;color:#777">${f.share}%</span>` : ''}`, i => {
       const x = D[i] && (D[i].fuels || []).find(g => g.type === f.type); if(!x) return '–';
       const pc = x.ge100 && +x.ge100.cover ? [100, x.ge100.cover] : x.ge50 && +x.ge50.cover ? [50, x.ge50.cover] : x.ge24 && +x.ge24.cover ? [24, x.ge24.cover] : null;
@@ -1876,9 +1879,8 @@ function flDraw(fd){
   const f = pin.filter;
   flSheet.innerHTML = `<div class="fh"><div><h2>⏱ Conditions filter · ${esc(pin.name)}</h2>
       <div class="sub">${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)} · ${fmtMGA(pin.lat, pin.lng)}</div>
-      ${fd && (fd.dn || fd.ln) ? `<div class="sub">Council: <b>${esc(fd.ln || '–')}</b> · District: <b>${esc(fd.dn ? fd.dn + ' District' : '–')}</b>${fd.dnFrom === 'forecast'
-          ? ' (as listed in the TFS detailed fire weather forecast)' : fd.dn ? ' (from the district boundary: council not found in the forecast)' : ''}${fd.geoDn && fd.dn && fd.geoDn !== fd.dn
-          ? `. The spot is inside the ${esc(fd.geoDn)} District boundary, but TFS lists ${esc(fd.ln)} under ${esc(fd.dn)}.` : ''}</div>` : ''}</div>
+      ${fd && (fd.dn || fd.ln) ? `<div class="sub">Council: <b>${esc(fd.ln || '–')}</b> · District: <b>${esc(fd.dn ? fd.dn + ' District' : '–')}</b>${fd.dnFrom !== 'forecast' && fd.dn
+          ? ' (council not found in the TFS forecast; district from the map boundary)' : ''}</div>` : ''}</div>
       <button type="button" id="flclose" title="Close">✕</button></div>
     <div class="fb">${flLimitsHTML(pin, fd)}
       <div class="flact ${f.active ? 'on' : ''}">${flHasAny(f)
