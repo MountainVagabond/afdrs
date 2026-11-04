@@ -79,6 +79,21 @@
   #fcsheet .txt{margin:8px 0 0;line-height:1.4}#fcsheet .txt b{display:inline-block;min-width:5.5em}
   #fcsheet .note{color:#666;font-size:11px;margin-top:8px;line-height:1.4}
   #fcsheet .acts{display:flex;gap:6px;margin-top:8px}#fcsheet .acts a,#fcsheet .acts button{flex:1;font-size:12px;padding:6px;text-align:center;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;color:#222;text-decoration:none;cursor:pointer}
+  /* hourly model forecast (Open-Meteo), its own section below the TFS forecast */
+  #fcsheet .omsec{border-top:3px solid #7a5cc4;margin:0 10px 10px;padding-top:8px}
+  #fcsheet .omh{font-weight:700;font-size:13px;margin-bottom:4px}#fcsheet .omh span{font-weight:400;color:#666}
+  #fcsheet .omsec p{margin:4px 0}
+  #fcsheet .omnote{background:#f3effb;border:1px solid #d6cdee;border-radius:6px;padding:6px 8px;margin-top:8px;color:#333;font-size:11px;line-height:1.4}
+  #fcsheet .omdays{display:flex;gap:4px;margin:4px 0 6px}#fcsheet .omdays button{flex:1;padding:5px 0;border:1px solid #bbb;background:#f4f4f4;border-radius:4px;font-size:12px;cursor:pointer}
+  #fcsheet .omdays button.on{background:#7a5cc4;border-color:#7a5cc4;color:#fff}
+  #fcsheet .omsum{margin:0 0 6px;line-height:1.45}
+  #fcsheet .omflag{color:#8a4b00;font-weight:700}
+  #fcsheet table.omt th:first-child,#fcsheet table.omt td:first-child{width:15%;font-weight:600;color:#444}
+  #fcsheet table.omt td{padding:3px 2px}
+  #fcsheet .omx{background:#ffd8a8;font-weight:700}
+  #fcsheet table.omt tr.past td{color:#999;background:none;font-weight:400}
+  #fcsheet .omleg{color:#555;font-size:11px;margin-top:6px;line-height:1.4}#fcsheet .omleg .omx{display:inline-block;width:14px;border:1px solid #c88a3c}
+  #fcsheet .omauto{display:flex;gap:6px;align-items:center;margin-top:6px;font-size:12px}
   .pinpop .fcbtn{width:100%;margin:0 0 6px;font-size:12px;padding:5px;border:1px solid #c8102e;background:#fff;color:#c8102e;border-radius:4px;cursor:pointer;font-weight:600}
   .stpop{min-width:200px;font-size:12px}.stpop h3{font-size:13px;margin:0 0 2px}.stpop .k{color:#555;margin-bottom:6px}
   .stpop a.go{display:block;text-align:center;padding:7px;margin:4px 0;border-radius:4px;background:#c8102e;color:#fff;text-decoration:none;font-weight:600}
@@ -1446,6 +1461,124 @@ fcSheet.addEventListener('click', e => { if(e.target.id === 'fcclose'){ fcSheet.
 const fcRefresh = () => { if(fcLast && !fcSheet.hidden) showForecast(fcLast.lat, fcLast.lng, fcLast.name); };
 $('days').addEventListener('click', () => setTimeout(fcRefresh, 0));
 ['date', 'run', 'source'].forEach(id => $(id).addEventListener('change', () => setTimeout(fcRefresh, 0)));
+
+/* ---------- Hourly model forecast (Open-Meteo) ----------
+   A separate section at the bottom of the 🌦 panel, below the TFS forecast. Computer model output only:
+   not quality-assured by a meteorologist or the Bureau of Meteorology. Nothing is sent to Open-Meteo
+   until "Load" is tapped (or "load automatically" is ticked). Everything here is self-contained: if
+   Open-Meteo is down or changes, only this section says so; the rest of the panel is unaffected.
+   Tries BoM's ACCESS-G model first; Open-Meteo notes BoM's open data feed is sometimes suspended, so
+   it falls back to Open-Meteo's best-match models and always names the model used.                 */
+const OM = {
+  url: 'https://api.open-meteo.com/v1/forecast',
+  vars: 'temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation',
+  autoKey: 'afdrsOmAuto',
+  maxTemp: 20, maxWind: 15,               // permit limits flagged in the table: temperature > 20 °C, wind > 15 km/h
+  cache: new Map(), el: null, key: '', pick: null
+};
+const omKey = (lat, lng) => `${lat.toFixed(3)},${lng.toFixed(3)}`;
+const omDir = d => d == null ? '' : ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(d / 22.5) % 16];
+async function omGet(lat, lng, model){
+  const q = `${OM.url}?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&hourly=${OM.vars}&timezone=Australia%2FHobart`
+          + `&forecast_days=5&wind_speed_unit=kmh${model ? '&models=' + model : ''}`;
+  const r = await fetch(q, {cache: 'no-store'}); if(!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json(); if(!j || !j.hourly || !Array.isArray(j.hourly.time)) throw new Error('unexpected reply');
+  return j;
+}
+const omHasData = j => (j.hourly.temperature_2m || []).slice(0, 24).filter(v => v != null).length >= 12;
+async function omLoad(lat, lng){
+  const k = omKey(lat, lng), hit = OM.cache.get(k);
+  if(hit && Date.now() - hit.t < 30*60*1000) return hit;
+  let data = null, model = 'BoM ACCESS-G (about 15 km grid)', fallback = false;
+  try { data = await omGet(lat, lng, 'bom_access_global'); if(!omHasData(data)) data = null; } catch(e){ data = null; }
+  if(!data){ data = await omGet(lat, lng, ''); fallback = true; model = 'Open-Meteo best-match models (BoM ACCESS-G not available right now)'; }
+  const out = {t: Date.now(), data, model, fallback}; OM.cache.set(k, out); return out;
+}
+function omCreditHTML(model){
+  return `<div class="omnote"><b>Computer model output, not an official forecast.</b> It has not been quality-assured by a
+    meteorologist or the Bureau of Meteorology, and may differ from MetEye and from the TFS/BoM forecast above. Use the official
+    forecast for decisions.<br>Model: ${esc(model)}. Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>
+    (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>).</div>`;
+}
+function omTable(sec, res){
+  const h = res.data.hourly, times = h.time, dates = [...new Set(times.map(t => t.slice(0, 10)))].slice(0, 5);
+  // Tabs carry real dates, so they line up with the TFS columns above (which move on a day after the evening issue)
+  const labels = dates.map(d => new Date(d + 'T12:00').toLocaleDateString('en-AU', {weekday: 'short', day: 'numeric'}));
+  if(OM.pick == null || OM.pick >= dates.length) OM.pick = source === 'archive' ? 0 : Math.min(day, dates.length - 1);
+  const di = OM.pick, date = dates[di], idx = times.map((t, i) => t.startsWith(date) ? i : -1).filter(i => i >= 0);
+  const v = (name, i) => (h[name] || [])[i];
+  const nowStr = new Date().toLocaleString('sv-SE', {timeZone: 'Australia/Hobart'}).slice(0, 13).replace(' ', 'T');
+  const num = x => x == null ? '–' : Math.round(x);
+  const over = (x, lim) => x != null && x > lim;
+  // Day summary
+  const T = idx.map(i => v('temperature_2m', i)).filter(x => x != null), RH = idx.map(i => v('relative_humidity_2m', i)).filter(x => x != null);
+  const WS = idx.map(i => v('wind_speed_10m', i)).filter(x => x != null), WG = idx.map(i => v('wind_gusts_10m', i)).filter(x => x != null);
+  const P = idx.map(i => v('precipitation', i)).filter(x => x != null);
+  const hrsOver = idx.filter(i => over(v('temperature_2m', i), OM.maxTemp) || over(v('wind_speed_10m', i), OM.maxWind)).length;
+  const dLabel = new Date(date + 'T12:00').toLocaleDateString('en-AU', {weekday: 'short', day: 'numeric', month: 'short'});
+  let html = `<div class="omdays">${dates.map((d, i) => `<button type="button" data-om="${i}" class="${i === di ? 'on' : ''}">${labels[i]}</button>`).join('')}</div>
+    <div class="omsum"><b>${esc(dLabel)}</b>: max ${T.length ? Math.round(Math.max(...T)) : '–'} °C · min RH ${RH.length ? Math.round(Math.min(...RH)) : '–'}% ·
+      wind to ${WS.length ? Math.round(Math.max(...WS)) : '–'} km/h, gusts ${WG.length ? Math.round(Math.max(...WG)) : '–'} · rain ${P.length ? P.reduce((a, b) => a + b, 0).toFixed(1) : '–'} mm
+      ${hrsOver ? `<br><span class="omflag">${hrsOver} hour${hrsOver === 1 ? '' : 's'} over the permit limits</span>` : ''}</div>
+    <table class="omt"><thead><tr><th>Time</th><th>Temp °C</th><th>RH %</th><th>Wind km/h</th><th>Gust</th><th>Rain mm</th></tr></thead><tbody>`;
+  for(const i of idx){
+    const t = times[i], te = v('temperature_2m', i), ws = v('wind_speed_10m', i);
+    html += `<tr class="${t.slice(0, 13) === nowStr ? 'cur' : t.slice(0, 13) < nowStr ? 'past' : ''}"><td>${t.slice(11, 16)}</td>
+      <td${over(te, OM.maxTemp) ? ' class="omx"' : ''}>${num(te)}</td><td>${num(v('relative_humidity_2m', i))}</td>
+      <td${over(ws, OM.maxWind) ? ' class="omx"' : ''}>${omDir(v('wind_direction_10m', i))} ${num(ws)}</td><td>${num(v('wind_gusts_10m', i))}</td>
+      <td>${v('precipitation', i) == null ? '–' : v('precipitation', i) > 0 ? v('precipitation', i).toFixed(1) : '0'}</td></tr>`;
+  }
+  html += `</tbody></table><div class="omleg"><span class="omx">&nbsp;&nbsp;</span> over the permit limits (temperature above ${OM.maxTemp} °C,
+    wind above ${OM.maxWind} km/h). Wind is the 10 m average from the direction shown; gusts are higher.
+    ${source === 'archive' ? '<br><b>This is the current model forecast, not as issued on the archive date shown above.</b>' : ''}
+    ${res.data.elevation != null ? `<br>Elevation used by the model: ${Math.round(res.data.elevation)} m.` : ''}
+    Fetched ${new Date(res.t).toLocaleTimeString('en-AU', {hour: '2-digit', minute: '2-digit'})}.</div>`;
+  return html + omCreditHTML(res.model);
+}
+function omRender(sec, lat, lng){
+  const k = omKey(lat, lng), res = OM.cache.get(k), auto = !!ls.get(OM.autoKey);
+  const head = `<div class="omh">Hourly model forecast <span>· Open-Meteo</span></div>`;
+  const autoBox = `<label class="omauto"><input type="checkbox" ${auto ? 'checked' : ''}> Load automatically for each spot</label>`;
+  if(res && res.data){ sec.innerHTML = head + omTable(sec, res) + autoBox; return; }
+  if(sec.dataset.state === 'loading'){ sec.innerHTML = head + '<p>Loading the model forecast…</p>'; return; }
+  if(sec.dataset.state === 'error'){
+    sec.innerHTML = head + `<p><b style="color:#c8102e">Couldn’t load the model forecast.</b> ${esc(sec.dataset.err || '')}
+      The TFS forecast above is unaffected.</p><div class="acts"><button type="button" data-omload="1">Try again</button></div>` + omCreditHTML('none loaded');
+    return;
+  }
+  sec.innerHTML = head + `<p>Hourly temperature, humidity, wind, gusts and rain for this spot, from a computer weather model.
+    Tapping Load sends this spot’s coordinates to Open-Meteo.</p>
+    <div class="acts"><button type="button" data-omload="1">Load hourly model forecast</button></div>
+    ${autoBox}` + omCreditHTML('—');
+  if(auto) omFetch(sec, lat, lng);
+}
+async function omFetch(sec, lat, lng){
+  sec.dataset.state = 'loading'; omRender(sec, lat, lng);
+  try { await omLoad(lat, lng); sec.dataset.state = ''; }
+  catch(e){ sec.dataset.state = 'error'; sec.dataset.err = /Failed to fetch|NetworkError|net/i.test(e.message)
+      ? 'Check the phone has signal, then try again.' : `(${e.message})`; }
+  if(OM.el === sec && OM.key === omKey(lat, lng)) omRender(sec, lat, lng);
+}
+// Keep the section at the bottom of the panel whenever the TFS part redraws (day buttons, archive date, key, retry)
+function omAttach(){
+  try {
+    if(fcSheet.hidden || !fcLast || fcSheet.contains(OM.el)) return;
+    const k = omKey(fcLast.lat, fcLast.lng);
+    if(!OM.el || OM.key !== k){
+      OM.el = document.createElement('div'); OM.el.className = 'omsec'; OM.key = k; OM.pick = null;
+      const {lat, lng} = fcLast, sec = OM.el;
+      sec.addEventListener('click', e => {
+        const b = e.target.closest('button'); if(!b) return;
+        if(b.dataset.omload){ omFetch(sec, lat, lng); }
+        if(b.dataset.om != null){ OM.pick = +b.dataset.om; omRender(sec, lat, lng); }
+      });
+      sec.addEventListener('change', e => { if(e.target.type === 'checkbox'){ ls.set(OM.autoKey, e.target.checked); if(e.target.checked) omFetch(sec, lat, lng); } });
+    } else if(source !== 'archive') OM.pick = null;                                   // follow the map's day button
+    fcSheet.append(OM.el); omRender(OM.el, fcLast.lat, fcLast.lng);
+  } catch(e){ console.warn('Model forecast section failed', e); }
+}
+new MutationObserver(() => omAttach()).observe(fcSheet, {childList: true});
+
 
 /* ---------- Weather stations: each dot opens that station's live page on the Tas Fire Weather Map ----------
    Positions come from fdr_archive/stations.json (BoM list from the site's app; agency positions refreshed by
