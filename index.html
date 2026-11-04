@@ -108,6 +108,14 @@
   #flsheet .flact button{flex:none;font-size:13px;font-weight:700;padding:7px 12px;border-radius:6px;cursor:pointer;border:2px solid #7a5cc4;background:#7a5cc4;color:#fff}
   #flsheet .flact.on button{background:#eaf7ee;border-color:#2fa84f;color:#145c26}
   #flsheet .flbtns button:disabled{opacity:.45}
+  #flsheet .flseq{margin-top:8px;border-top:1px dashed #d6cdee;padding-top:6px}#flsheet .flseq.set .flseqh{color:#5b3fb0}
+  #flsheet .flseqh{font-weight:700;font-size:12px}#flsheet .flseqh span{font-weight:400;color:#666}
+  #flsheet .flseq .fllim td:first-child{width:40%}
+  #flsheet .flwins button small{display:block;font-weight:400;font-size:10.5px;color:#2a6b3a}
+  #flsheet .flnear{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 4px}#flsheet .flnear button{font-size:11px;padding:3px 8px;border:1px dashed #aaa;background:#f6f6f6;color:#555;border-radius:12px;cursor:pointer;text-align:left}
+  #flsheet .flseqres{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;font-size:12px}#flsheet .flseqres span{padding:3px 6px;border-radius:4px}
+  :is(#fcsheet,#flsheet) table.omt tr.flnear td:first-child{box-shadow:inset 4px 0 #b9b9b9}
+  #fcsheet .omflbar button{border-color:#7a5cc4;color:#5b3fb0;font-weight:700;background:#fff}
   #flsheet .flcond{border:1px solid #d6cdee;border-radius:6px;padding:6px 8px;background:#faf8fe}
   #flsheet .flcond summary{cursor:pointer;line-height:1.5;list-style:none}#flsheet .flcond summary::-webkit-details-marker{display:none}
   #flsheet .flcond .fledit{display:inline-block;font-size:11px;padding:1px 8px;border:1px solid #7a5cc4;color:#5b3fb0;border-radius:10px;background:#fff;margin-left:2px}
@@ -230,7 +238,6 @@
   <button id="locate" title="Show my location (tap again to stop)">🎯</button>
   <button id="fcmode" title="Fire weather forecast: tap this, then tap a place on the map">🌦</button>
   <button id="tracebtn" title="Trace an area: walk its edge and GPS draws the shape">👣</button>
-  <button id="flmode" title="Conditions filter: tap this, then tap a spot">⏱</button>
 </div>
 <div id="flsheet" hidden></div>
 <div id="tracebar" hidden></div>
@@ -1524,7 +1531,7 @@ const omKey = (lat, lng) => `${lat.toFixed(3)},${lng.toFixed(3)}`;
 const omDir = d => d == null ? '' : ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(d / 22.5) % 16];
 async function omGet(lat, lng, model){
   const q = `${OM.url}?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&hourly=${OM.vars}&timezone=Australia%2FHobart`
-          + `&forecast_days=5&wind_speed_unit=kmh${model ? '&models=' + model : ''}`;
+          + `&forecast_days=5&past_days=3&wind_speed_unit=kmh${model ? '&models=' + model : ''}`;
   const r = await fetch(q, {cache: 'no-store'}); if(!r.ok) throw new Error('HTTP ' + r.status);
   const j = await r.json(); if(!j || !j.hourly || !Array.isArray(j.hourly.time)) throw new Error('unexpected reply');
   return j;
@@ -1545,7 +1552,8 @@ function omCreditHTML(model){
     (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>).</div>`;
 }
 function omTable(sec, res, lat, lng){
-  const h = res.data.hourly, times = h.time, dates = [...new Set(times.map(t => t.slice(0, 10)))].slice(0, 5);
+  const today0 = new Date().toLocaleString('sv-SE', {timeZone: 'Australia/Hobart'}).slice(0, 10);
+  const h = res.data.hourly, times = h.time, dates = [...new Set(times.map(t => t.slice(0, 10)))].filter(d => d >= today0).slice(0, 5);
   // Tabs carry real dates, so they line up with the TFS columns above (which move on a day after the evening issue)
   const labels = dates.map(d => new Date(d + 'T12:00').toLocaleDateString('en-AU', {weekday: 'short', day: 'numeric'}));
   if(OM.pick == null || OM.pick >= dates.length) OM.pick = source === 'archive' ? 0 : Math.min(day, dates.length - 1);
@@ -1557,20 +1565,21 @@ function omTable(sec, res, lat, lng){
   const site = typeof flSiteAt === 'function' ? flSiteAt(lat, lng) : null, fd = site ? flCache.get(flKey(site)) : null;
   if(site && !fd) flData(site).then(() => { if(OM.el === sec) omRender(sec, lat, lng); }).catch(() => {});
   const ev = i => site ? flEvalHour(site.filter, fd, res, i) : null;
+  const okSet = site ? flOkSet(site.filter, fd, res) : null, seqOn = site && flSeqOn(site.filter);
   const T = idx.map(i => v('temperature_2m', i)).filter(x => x != null), RH = idx.map(i => v('relative_humidity_2m', i)).filter(x => x != null);
   const WS = idx.map(i => v('wind_speed_10m', i)).filter(x => x != null), WG = idx.map(i => v('wind_gusts_10m', i)).filter(x => x != null);
   const P = idx.map(i => v('precipitation', i)).filter(x => x != null);
-  const nPass = site ? idx.filter(i => times[i].slice(0, 13) >= nowStr && ev(i).state === 'pass').length : 0;
+  const nPass = site ? idx.filter(i => okSet.has(i)).length : 0;
   const dLabel = new Date(date + 'T12:00').toLocaleDateString('en-AU', {weekday: 'short', day: 'numeric', month: 'short'});
   let html = `<div class="omdays">${dates.map((d, i) => `<button type="button" data-om="${i}" class="${i === di ? 'on' : ''}">${labels[i]}</button>`).join('')}</div>
     <div class="omsum"><b>${esc(dLabel)}</b>: max ${T.length ? Math.round(Math.max(...T)) : '–'} °C · min RH ${RH.length ? Math.round(Math.min(...RH)) : '–'}% ·
       wind to ${WS.length ? Math.round(Math.max(...WS)) : '–'} km/h, gusts ${WG.length ? Math.round(Math.max(...WG)) : '–'} · rain ${P.length ? P.reduce((a, b) => a + b, 0).toFixed(1) : '–'} mm
-      ${site ? `<br><span class="omflag">⏱ ${esc(site.name)}: ${nPass ? `${nPass} hour${nPass === 1 ? '' : 's'} ahead meet every condition` : 'no hours ahead meet every condition'}${fd ? '' : ' (checking FDR/FBI…)'}</span>` : ''}</div>
+      ${site ? `<br><span class="omflag">⏱ ${esc(site.name)}: ${nPass ? `${nPass} hour${nPass === 1 ? ' ahead meets' : 's ahead meet'} every condition${seqOn ? ', incl. rain before/after' : ''}` : `no hours ahead meet every condition${seqOn ? ' (incl. rain before/after)' : ''}`}${fd ? '' : ' (checking FDR/FBI…)'}</span>` : ''}</div>
     <table class="omt"><thead><tr><th>Time</th><th>Temp °C</th><th>RH %</th><th>Wind km/h</th><th>Gust</th><th>Rain mm</th></tr></thead><tbody>`;
   for(const i of idx){
     const t = times[i], e = ev(i), c = k => !e || !(site.filter.lim[k] && (site.filter.lim[k].min != null || site.filter.lim[k].max != null)) ? ''
       : e.bad.has(k) ? ' class="omx"' : e.miss.has(k) ? ' class="flm"' : ' class="omok"';
-    const rc = [t.slice(0, 13) === nowStr ? 'cur' : t.slice(0, 13) < nowStr ? 'past' : '', e ? 'fl' + e.state : ''].filter(Boolean).join(' ');
+    const rc = [t.slice(0, 13) === nowStr ? 'cur' : t.slice(0, 13) < nowStr ? 'past' : '', e ? (okSet.has(i) ? 'flpass' : 'fl' + (e.state === 'pass' ? 'near' : e.state)) : ''].filter(Boolean).join(' ');
     html += `<tr class="${rc}"><td>${t.slice(11, 16)}</td>
       <td${c('temp')}>${num(v('temperature_2m', i))}</td><td${c('rh')}>${num(v('relative_humidity_2m', i))}</td>
       <td${c('wind')}>${omDir(v('wind_direction_10m', i))} ${num(v('wind_speed_10m', i))}</td><td${c('gust')}>${num(v('wind_gusts_10m', i))}</td>
@@ -1578,9 +1587,8 @@ function omTable(sec, res, lat, lng){
   }
   html += `</tbody></table><div class="omleg">${site
       ? `Highlighted by the active conditions filter on <b>${esc(site.name)}</b>: each value with a limit is <span class="omok">&nbsp;green&nbsp;</span> inside it or
-         <span class="omx">&nbsp;orange&nbsp;</span> outside it; a green bar marks hours where every condition is met (including that day's FDR/FBI).
-         <button type="button" class="omfl" data-fledit="1">Edit filter</button>`
-      : 'No active conditions filter at this spot. Tap ⏱ then this spot (or ⏱ in a pin) to set one, then activate it.'}
+         <span class="omx">&nbsp;orange&nbsp;</span> outside it; a green bar marks hours where every condition is met (including that day's FDR/FBI${seqOn ? ', and the rain before/after the window' : ''}).`
+      : 'No active conditions filter at this spot.'}
     Wind is the 10 m average from the direction shown; gusts are higher.
     ${source === 'archive' ? '<br><b>This is the current model forecast, not as issued on the archive date shown above.</b>' : ''}
     ${res.data.elevation != null ? `<br>Elevation used by the model: ${Math.round(res.data.elevation)} m.` : ''}
@@ -1591,7 +1599,9 @@ function omRender(sec, lat, lng){
   const k = omKey(lat, lng), res = OM.cache.get(k), auto = !!ls.get(OM.autoKey);
   const head = `<div class="omh">Hourly model forecast <span>· Open-Meteo</span></div>`;
   const autoBox = `<label class="omauto"><input type="checkbox" ${auto ? 'checked' : ''}> Load automatically for each spot</label>`;
-  if(res && res.data){ sec.innerHTML = head + omTable(sec, res, lat, lng) + autoBox; return; }
+  const fp = pins.find(p => p.filter && haversine([p.lat, p.lng], [lat, lng]) < 25);
+  const flBtn = `<div class="acts omflbar"><button type="button" data-flopen="1">⏱ Conditions filter${fp ? (fp.filter.active ? ' · active' : ' · off') : ''}</button></div>`;
+  if(res && res.data){ sec.innerHTML = head + omTable(sec, res, lat, lng) + flBtn + autoBox; return; }
   if(sec.dataset.state === 'loading'){ sec.innerHTML = head + '<p>Loading the model forecast…</p>'; return; }
   if(sec.dataset.state === 'error'){
     sec.innerHTML = head + `<p><b style="color:#c8102e">Couldn’t load the model forecast.</b> ${esc(sec.dataset.err || '')}
@@ -1601,7 +1611,7 @@ function omRender(sec, lat, lng){
   sec.innerHTML = head + `<p>Hourly temperature, humidity, wind, gusts and rain for this spot, from a computer weather model.
     Tapping Load sends this spot’s coordinates to Open-Meteo.</p>
     <div class="acts"><button type="button" data-omload="1">Load hourly model forecast</button></div>
-    ${autoBox}` + omCreditHTML('—');
+    ${flBtn}${autoBox}` + omCreditHTML('—');
   if(auto) omFetch(sec, lat, lng);
 }
 async function omFetch(sec, lat, lng){
@@ -1622,6 +1632,7 @@ function omAttach(){
       sec.addEventListener('click', e => {
         const b = e.target.closest('button'); if(!b) return;
         if(b.dataset.omload){ omFetch(sec, lat, lng); }
+        if(b.dataset.flopen){ openFilterAt(lat, lng, fcLast && fcLast.name); }
         if(b.dataset.om != null){ OM.pick = +b.dataset.om; omRender(sec, lat, lng); }
       });
       sec.addEventListener('change', e => { if(e.target.type === 'checkbox'){ ls.set(OM.autoKey, e.target.checked); if(e.target.checked) omFetch(sec, lat, lng); } });
@@ -1644,22 +1655,27 @@ new MutationObserver(() => omAttach()).observe(fcSheet, {childList: true});
 const FL_ORIGINAL = {temp: {max: 20}, rh: {min: 40}, wind: {max: 15}};
 const FLDEFKEY = 'afdrsFilterDefaults';
 const FL_DEFAULT = () => ({lim: {}, active: false, tab: 'find', win: null});
-const flMyDefaults = () => { const d = ls.get(FLDEFKEY); return d && typeof d === 'object' ? d : JSON.parse(JSON.stringify(FL_ORIGINAL)); };
-const flIsOriginal = () => JSON.stringify(flMyDefaults()) === JSON.stringify(FL_ORIGINAL);
+const flClone = x => JSON.parse(JSON.stringify(x || {}));
+// Saved defaults are {lim, seq}; an older save was just the lim object
+const flMyDefaults = () => { const d = ls.get(FLDEFKEY);
+  if(d && d.lim) return {lim: flClone(d.lim), seq: flClone(d.seq)};
+  if(d && typeof d === 'object') return {lim: flClone(d), seq: {}};
+  return {lim: flClone(FL_ORIGINAL), seq: {}}; };
+const flIsOriginal = () => { const d = flMyDefaults(); return JSON.stringify(d.lim) === JSON.stringify(FL_ORIGINAL) && !flSeqOn(d); };
 const FDR_NAMES = ['No rating', 'Moderate', 'High', 'Extreme', 'Catastrophic'];
 const FDR_BG = ['#ffffff', '#64bf30', '#ffe033', '#f58220', '#b11a1a'];
 const fdrIdx = s => { const i = FDR_NAMES.findIndex(n => n.toLowerCase() === String(s || '').trim().toLowerCase()); return i < 0 ? null : i; };
 const FL_HOUR = [['temp', 'Temperature °C', 'temperature_2m'], ['rh', 'Humidity (RH) %', 'relative_humidity_2m'],
                  ['wind', 'Wind km/h (10 m average)', 'wind_speed_10m'], ['gust', 'Wind gusts km/h', 'wind_gusts_10m'],
                  ['rain', 'Rain mm in the hour', 'precipitation']];
-const FL_DAY = [['fdrGrid', 'FDR, this grid square (map)', 'fdr'], ['fdrCouncil', 'FDR, council (TFS)', 'fdr'],
+const FL_DAY = [['fdrGrid', 'FDR, this grid square (map)', 'fdr'], ['fdrCouncil', 'FDR, council (TFS)', 'fdr'], ['fdrDist', 'FDR, district (TFS)', 'fdr'],
                 ['fbiDist', 'FBI, district', 'num'], ['fbiCouncil', 'FBI, council', 'num']];
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const hobartNow = () => new Date().toLocaleString('sv-SE', {timeZone: 'Australia/Hobart'}).slice(0, 13).replace(' ', 'T');
 const dLab = (d, long) => new Date(d + 'T12:00').toLocaleDateString('en-AU', long ? {weekday: 'short', day: 'numeric', month: 'short'} : {weekday: 'short', day: 'numeric'});
 const flKey = p => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
 // The filtered pin at a spot (within 25 m), so the 🌦 panel for that spot can be highlighted
-const flSiteAt = (lat, lng) => pins.find(p => p.filter && p.filter.active && flActive(p.filter).length && haversine([p.lat, p.lng], [lat, lng]) < 25) || null;
+const flSiteAt = (lat, lng) => pins.find(p => p.filter && p.filter.active && flHasAny(p.filter) && haversine([p.lat, p.lng], [lat, lng]) < 25) || null;
 
 // ---- data for a site: model hours + TFS daily values + map FDR per day (cached 15 min) ----
 const flCache = new Map(), flBusy = new Map();
@@ -1699,7 +1715,7 @@ async function flData(pin){
         if(out.ln) for(const kk of Object.keys(d.districts || {})){ const s = (d.districts[kk].subs || []).find(s => normName(s.name) === normName(out.ln)); if(s){ sub = s; break; } }
         const row = out.daily[d.date] = out.daily[d.date] || {};
         row.fdrCouncil = sub ? fdrIdx(sub.rating) : null; row.fbiCouncil = sub && sub.fbi != null ? +sub.fbi : null;
-        row.fbiDist = D && D.fbi != null ? +D.fbi : null; row.ratingDist = D ? D.rating : '';
+        row.fbiDist = D && D.fbi != null ? +D.fbi : null; row.ratingDist = D ? D.rating : ''; row.fdrDist = D ? fdrIdx(D.rating) : null;
         for(const f of (D && D.fuels) || []){ if(f.fbi == null) continue; row['fuel:' + f.type] = +f.fbi; if(!out.fuels.includes(f.type)) out.fuels.push(f.type); }
         if(!out.tfsIssued) out.tfsIssued = d.issued || '';
       }
@@ -1717,9 +1733,48 @@ async function flData(pin){
 }
 
 // ---- evaluation ----
-const flRows = fd => [...FL_HOUR.map(([k, l]) => ({k, l, kind: 'hour', type: 'num'})), ...FL_DAY.map(([k, l, t]) => ({k, l, kind: 'day', type: t})),
-                      ...((fd && fd.fuels) || []).map(t => ({k: 'fuel:' + t, l: `FBI, ${t} (district)`, kind: 'day', type: 'num'}))];
+const flRows = fd => { const dn = fd && fd.dn ? `${fd.dn} District` : 'district';
+  const lab = (k, l) => k === 'fbiDist' ? `FBI, ${dn}` : k === 'fdrDist' ? `FDR, ${dn} (TFS)` : l;
+  return [...FL_HOUR.map(([k, l]) => ({k, l, kind: 'hour', type: 'num'})), ...FL_DAY.map(([k, l, t]) => ({k, l: lab(k, l), kind: 'day', type: t})),
+          ...((fd && fd.fuels) || []).map(t => ({k: 'fuel:' + t, l: `FBI, ${t} (${dn})`, kind: 'day', type: 'num'}))]; };
+const FL_SHORT = {temp: 'Temp', rh: 'RH', wind: 'Wind', gust: 'Gust', rain: 'Rain', fdrGrid: 'FDR square', fdrCouncil: 'FDR council',
+                  fdrDist: 'FDR district', fbiDist: 'FBI district', fbiCouncil: 'FBI council'};
+const flShort = k => FL_SHORT[k] || ('FBI ' + k.replace('fuel:', ''));
 function flActive(f){ return Object.entries((f && f.lim) || {}).filter(([, v]) => v && (v.min != null || v.max != null)); }
+// Rain before / after a window: seq = {bH, bMin, bMax, aH, aMin, aMax, minRun} (hours default 24)
+function flSeqOn(f){ const q = f && f.seq; return !!q && ['bMin', 'bMax', 'aMin', 'aMax', 'minRun'].some(k => q[k] != null); }
+function flHasAny(f){ return flActive(f).length > 0 || flSeqOn(f); }
+function flSeqEval(filter, model, r){                               // r = {i0, i1, hours}; adds ok, why, before, after
+  const h = model.data.hourly, P = h.precipitation || [], q = filter.seq || {};
+  r.ok = true; r.why = [];
+  if(!flSeqOn(filter)) return r;
+  const sum = (a, b) => { let x = 0; for(let i = a; i <= b; i++){ if(P[i] == null) return null; x += P[i]; } return Math.round(x * 10) / 10; };
+  if(q.minRun != null && r.hours < q.minRun){ r.ok = false; r.why.push(`shorter than ${q.minRun} h`); }
+  if(q.bMin != null || q.bMax != null){ const H = q.bH || 24; r.bH = H;
+    if(r.i0 - H < 0){ r.ok = false; r.why.push(`not enough model history for ${H} h before`); }
+    else { r.before = sum(r.i0 - H, r.i0 - 1);
+      if(r.before == null){ r.ok = false; r.why.push('no rain data before'); }
+      else if(flOut(r.before, {min: q.bMin, max: q.bMax})){ r.ok = false; r.why.push(`rain before ${r.before} mm in ${H} h`); } } }
+  if(q.aMin != null || q.aMax != null){ const H = q.aH || 24; r.aH = H;
+    if(r.i1 + H >= h.time.length){ r.ok = false; r.why.push(`the ${H} h after run past the forecast`); }
+    else { r.after = sum(r.i1 + 1, r.i1 + H);
+      if(r.after == null){ r.ok = false; r.why.push('no rain data after'); }
+      else if(flOut(r.after, {min: q.aMin, max: q.aMax})){ r.ok = false; r.why.push(`rain after ${r.after} mm in ${H} h`); } } }
+  return r;
+}
+// Runs of consecutive hours ahead that meet every hourly/daily condition (they can cross midnight), each checked for rain before/after
+function flRuns(filter, fd, model){
+  const h = model.data.hourly, now = hobartNow(), runs = []; let cur = null;
+  h.time.forEach((t, i) => {
+    const ok = t.slice(0, 13) >= now && flEvalHour(filter, fd, model, i).state === 'pass';
+    if(ok){ if(cur){ cur.hours++; cur.i1 = i; } else cur = {date: t.slice(0, 10), start: +t.slice(11, 13), hours: 1, i0: i, i1: i}; }
+    else if(cur){ runs.push(cur); cur = null; }
+  });
+  if(cur) runs.push(cur);
+  return runs.map(r => flSeqEval(filter, model, r));
+}
+// Indices of hours inside windows that meet everything (rain before/after included)
+function flOkSet(filter, fd, model){ const set = new Set(); for(const r of flRuns(filter, fd, model)) if(r.ok) for(let i = r.i0; i <= r.i1; i++) set.add(i); return set; }
 const flOut = (v, lim) => (lim.min != null && v < lim.min) || (lim.max != null && v > lim.max);
 function flEvalHour(filter, fd, model, i){
   const h = model && model.data && model.data.hourly, t = h ? h.time[i] : null, day = t ? (fd && fd.daily[t.slice(0, 10)]) || {} : {};
@@ -1739,16 +1794,13 @@ function flDayEval(filter, fd, date){
   return {bad, miss};
 }
 function flWindows(filter, fd, model, date){
-  const h = model.data.hourly, now = hobartNow(), wins = []; let cur = null, n = 0;
-  h.time.forEach((t, i) => {
-    if(!t.startsWith(date)) return;
-    const ok = t.slice(0, 13) >= now && flEvalHour(filter, fd, model, i).state === 'pass';
-    if(ok){ n++; if(cur) cur.hours++; else cur = {date, start: +t.slice(11, 13), hours: 1}; }
-    else if(cur){ wins.push(cur); cur = null; }
-  });
-  if(cur) wins.push(cur);
+  const h = model.data.hourly, runs = flRuns(filter, fd, model);
+  const wins = runs.filter(r => r.date === date);
+  let n = 0; for(const r of runs) if(r.ok) for(let i = r.i0; i <= r.i1; i++) if(h.time[i].startsWith(date)) n++;
   return {wins, n};
 }
+const flWinLabel = (model, r) => { const h = model.data.hourly, end = h.time[r.i1 + 1] || null, endHH = end ? end.slice(11, 13) : String((r.start + r.hours) % 24).padStart(2, '0');
+  return `${String(r.start).padStart(2, '0')}:00–${endHH}:00${end && end.slice(0, 10) !== r.date ? ' next day' : ''} (${r.hours} h)`; };
 const fmtVal = (row, v) => v == null ? '–' : row.type === 'fdr' ? FDR_NAMES[v] : Math.round(v * 10) / 10;
 const fdrChip = v => v == null ? '–' : `<span class="flfdr" style="background:${FDR_BG[v]};color:${v === 4 ? '#fff' : '#222'}">${FDR_NAMES[v]}</span>`;
 
@@ -1761,20 +1813,41 @@ function flLimInput(row, side, lim){
   if(row.type === 'fdr') return `<select data-k="${esc(row.k)}" data-side="${side}" aria-label="${esc(row.l)} ${side}"><option value="">—</option>${FDR_NAMES.map((n, i) => `<option value="${i}" ${v === i ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
   return `<input type="number" inputmode="decimal" step="any" data-k="${esc(row.k)}" data-side="${side}" value="${v == null ? '' : v}" placeholder="—" aria-label="${esc(row.l)} ${side}">`;
 }
-function flSummaryOf(lim){ return flSummary({filter: {lim}}); }
+function flSummaryOf(d){ return flSummary({filter: {lim: d.lim || {}, seq: d.seq || {}}}); }
 // One-line summary of the conditions that are set, e.g. "Temp ≤ 20 · RH ≥ 40"
 function flSummary(pin, fd){
-  const short = {temp: 'Temp', rh: 'RH', wind: 'Wind', gust: 'Gust', rain: 'Rain', fdrGrid: 'FDR square', fdrCouncil: 'FDR council', fbiDist: 'FBI district', fbiCouncil: 'FBI council'};
-  const parts = flActive(pin.filter).map(([k, lim]) => { const n = short[k] || ('FBI ' + k.replace('fuel:', '')), isF = k.startsWith('fdr');
+  const parts = flActive(pin.filter).map(([k, lim]) => { const n = flShort(k), isF = k.startsWith('fdr');
     const f = x => isF ? FDR_NAMES[x] : x;
     return lim.min != null && lim.max != null ? `${n} ${f(lim.min)}–${f(lim.max)}` : lim.min != null ? `${n} ≥ ${f(lim.min)}` : `${n} ≤ ${f(lim.max)}`; });
+  const q = pin.filter.seq || {};
+  if(q.bMin != null || q.bMax != null) parts.push(`Rain in ${q.bH || 24} h before ${q.bMin != null && q.bMax != null ? `${q.bMin}–${q.bMax}` : q.bMin != null ? '≥ ' + q.bMin : '≤ ' + q.bMax} mm`);
+  if(q.aMin != null || q.aMax != null) parts.push(`Rain in ${q.aH || 24} h after ${q.aMin != null && q.aMax != null ? `${q.aMin}–${q.aMax}` : q.aMin != null ? '≥ ' + q.aMin : '≤ ' + q.aMax} mm`);
+  if(q.minRun != null) parts.push(`Window ≥ ${q.minRun} h`);
   return parts.length ? parts.map(esc).join(' · ') : 'none set';
 }
 let flCondOpen = false;
+function flSeqHTML(pin){
+  const q = pin.filter.seq || {}, inp = (k, ph, mode) => `<input type="number" inputmode="${mode || 'decimal'}" step="any" data-seq="${k}" value="${q[k] == null ? '' : q[k]}" placeholder="${ph}" aria-label="${k}">`;
+  return `<div class="flseq ${flSeqOn(pin.filter) ? 'set' : ''}"><div class="flseqh">Rain before and after a window <span>(optional)</span></div>
+    <table class="fllim"><thead><tr><th></th><th>Hours</th><th>Min mm</th><th>Max mm</th></tr></thead><tbody>
+      <tr><td>Total rain in the hours <b>before</b></td><td>${inp('bH', '24', 'numeric')}</td><td>${inp('bMin', '—')}</td><td>${inp('bMax', '—')}</td></tr>
+      <tr><td>Total rain in the hours <b>after</b></td><td>${inp('aH', '24', 'numeric')}</td><td>${inp('aMin', '—')}</td><td>${inp('aMax', '—')}</td></tr>
+      <tr><td>Window at least (hours)</td><td>${inp('minRun', '—', 'numeric')}</td><td colspan="2"></td></tr></tbody></table>
+    <div class="flnote">A <b>window</b> is a run of consecutive hours meeting every condition above. It qualifies only if the rain totals
+      just before and just after it are within these limits. Hours: 1–72 (blank = 24). Rain is the model’s; hours before now are its
+      estimate for the last 3 days, not rain-gauge readings.</div></div>`;
+}
+function flAfterEdit(pin){
+  if(!flHasAny(pin.filter) && pin.filter.active){ pin.filter.active = false; refreshPins(); }
+  const st = $('flsumtxt'); if(st) st.innerHTML = flSummary(pin, flSheet._fd);
+  const ab = flSheet.querySelector('.flact'); if(ab && flHasAny(pin.filter) !== !!ab.querySelector('button')) setTimeout(() => flDraw(flSheet._fd), 0);
+  const sq = flSheet.querySelector('.flseq'); if(sq) sq.classList.toggle('set', flSeqOn(pin.filter));
+}
 function flLimitsHTML(pin, fd){
   return `<details class="flcond" ${flCondOpen ? 'open' : ''}><summary><b>Conditions:</b> <span id="flsumtxt">${flSummary(pin, fd)}</span> <span class="fledit">Edit conditions</span></summary>
     <table class="fllim"><thead><tr><th>Condition</th><th>Min</th><th>Max</th></tr></thead><tbody>${flRows(fd).map(r => {
     const lim = pin.filter.lim[r.k]; return `<tr class="${lim && (lim.min != null || lim.max != null) ? 'set' : ''}"><td>${esc(r.l)}</td><td>${flLimInput(r, 'min', lim)}</td><td>${flLimInput(r, 'max', lim)}</td></tr>`; }).join('')}</tbody></table>
+    ${flSeqHTML(pin)}
     <div class="flnote">Blank = no limit. Limits include the number typed (max 20 allows 20 °C). Hourly values are the Open-Meteo model for this spot
     (sends its coordinates to Open-Meteo); FDR and FBI are the TFS forecast, one value per day.</div>
     <div class="flbtns"><button type="button" id="flapply">Apply my defaults</button><button type="button" id="flsavedef">Save as my defaults</button></div>
@@ -1801,7 +1874,7 @@ function flDraw(fd){
       ${fd && (fd.dn || fd.ln) ? `<div class="sub">District: <b>${esc(fd.dn || '–')}</b> · Council: <b>${esc(fd.ln || '–')}</b></div>` : ''}</div>
       <button type="button" id="flclose" title="Close">✕</button></div>
     <div class="fb">${flLimitsHTML(pin, fd)}
-      <div class="flact ${f.active ? 'on' : ''}">${flActive(f).length
+      <div class="flact ${f.active ? 'on' : ''}">${flHasAny(f)
         ? `<button type="button" id="flactive">${f.active ? '✓ Filter active · tap to switch off' : 'Activate filter'}</button>
            <span>${f.active ? 'Forecast tables for this spot are highlighted.' : 'Highlights this spot’s forecast tables when switched on.'}</span>`
         : '<span>Set at least one condition (or <b>Apply my defaults</b>), then activate the filter.</span>'}</div>
@@ -1818,14 +1891,14 @@ function flDraw(fd){
 }
 function flResults(){
   const pin = flPin, fd = flSheet._fd, el = $('flres'); if(!pin || !fd || !el) return;
-  const f = pin.filter, model = fd.model, rows = flRows(fd), act = flActive(f);
-  if(!act.length){ el.innerHTML = '<p>No conditions set. Enter a min or max above.</p>'; return; }
+  const f = pin.filter, model = fd.model, rows = flRows(fd), seqOn = flSeqOn(f);
+  if(!flHasAny(f)){ el.innerHTML = '<p>No conditions set. Enter a min or max above.</p>'; return; }
   if(!model){ el.innerHTML = '<p><b style="color:#c8102e">The hourly model forecast couldn’t be loaded,</b> so hours can’t be checked. Try again later.</p>'; return; }
-  const h = model.data.hourly, dates = [...new Set(h.time.map(t => t.slice(0, 10)))].slice(0, 5), now = hobartNow();
+  const h = model.data.hourly, now = hobartNow(), dates = [...new Set(h.time.map(t => t.slice(0, 10)))].filter(d => d >= now.slice(0, 10)).slice(0, 5);
   const dayLine = date => { const de = flDayEval(f, fd, date), d = fd.daily[date] || {};
     const parts = rows.filter(r => r.kind === 'day' && (d[r.k] != null || (f.lim[r.k] && (f.lim[r.k].min != null || f.lim[r.k].max != null))))
       .map(r => { const v = d[r.k], c = de.bad.has(r.k) ? 'bad' : de.miss.has(r.k) ? 'miss' : '';
-        return `<span class="${c}">${esc(r.l.replace(' (district)', '').replace('FDR, this grid square (map)', 'FDR square').replace('FDR, council (TFS)', 'FDR council'))}: ${r.type === 'fdr' ? fdrChip(v) : fmtVal(r, v)}</span>`; });
+        return `<span class="${c}">${esc(flShort(r.k))}: ${r.type === 'fdr' ? fdrChip(v) : fmtVal(r, v)}</span>`; });
     return parts.length ? `<div class="flday">${parts.join(' · ')}</div>` : ''; };
   if(f.tab !== 'check'){
     let html = '';
@@ -1833,13 +1906,19 @@ function flResults(){
       const {wins, n} = flWindows(f, fd, model, date), cells = [];
       h.time.forEach((t, i) => { if(!t.startsWith(date)) return; const e = flEvalHour(f, fd, model, i), past = t.slice(0, 13) < now;
         cells.push(`<span class="${e.state}${past ? ' past' : ''}" title="${t.slice(11, 16)} ${e.state === 'pass' ? 'meets all' : e.state === 'fail' ? 'outside: ' + [...e.bad].join(', ') : 'no data: ' + [...e.miss].join(', ')}"></span>`); });
-      html += `<div class="flblk"><div class="flhd"><b>${esc(dLab(date, true))}</b> — ${n ? `<span class="ok">${n} hour${n === 1 ? '' : 's'} meet all conditions</span>` : '<span class="no">no hours meet all conditions</span>'}</div>
+      const okW = wins.filter(w => w.ok), badW = wins.filter(w => !w.ok);
+      const head = seqOn ? (okW.length ? `<span class="ok">${okW.length} window${okW.length === 1 ? ' meets' : 's meet'} everything, incl. rain before/after</span>` : '<span class="no">no windows meet everything</span>')
+                         : (n ? `<span class="ok">${n} hour${n === 1 ? ' meets' : 's meet'} all conditions</span>` : '<span class="no">no hours meet all conditions</span>');
+      html += `<div class="flblk"><div class="flhd"><b>${esc(dLab(date, true))}</b> — ${head}</div>
         <div class="flstrip">${cells.join('')}</div><div class="flaxis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
-        ${wins.length ? `<div class="flwins">${wins.map(w => `<button type="button" data-flwin="${w.date}|${w.start}|${w.hours}">${String(w.start).padStart(2, '0')}:00–${String(w.start + w.hours).padStart(2, '0')}:00 (${w.hours} h)</button>`).join('')}</div>` : ''}
+        ${okW.length ? `<div class="flwins">${okW.map(w => `<button type="button" data-flwin="${w.date}|${w.start}|${w.hours}">${flWinLabel(model, w)}${seqOn && (w.before != null || w.after != null)
+            ? `<small>${w.before != null ? `rain before ${w.before} mm/${w.bH} h` : ''}${w.before != null && w.after != null ? ' · ' : ''}${w.after != null ? `after ${w.after} mm/${w.aH} h` : ''}</small>` : ''}</button>`).join('')}</div>` : ''}
+        ${badW.length ? `<div class="flnear">${badW.map(w => `<button type="button" data-flwin="${w.date}|${w.start}|${w.hours}">${flWinLabel(model, w)}: ${esc(w.why.join('; '))}</button>`).join('')}</div>` : ''}
         ${dayLine(date)}</div>`;
     }
     el.innerHTML = html + `<div class="flnote"><span class="flkey pass"></span> meets every condition <span class="flkey fail"></span> outside a limit
-      <span class="flkey nodata"></span> no data (e.g. beyond the TFS forecast). Tap a time range to check it in detail. Past hours are faded.</div>`;
+      <span class="flkey nodata"></span> no data (e.g. beyond the TFS forecast). Tap a time range to check it in detail. Past hours are faded.
+      ${seqOn ? 'Green buttons are windows that also meet the rain before/after limits; grey ones meet the hourly conditions but not the rain limits (reason shown).' : ''}</div>`;
     return;
   }
   // Check a time
@@ -1853,8 +1932,14 @@ function flResults(){
       <label>Start <select id="flws">${Array.from({length: 24}, (_, k) => `<option value="${k}" ${k === w.start ? 'selected' : ''}>${String(k).padStart(2, '0')}:00</option>`).join('')}</select></label>
       <label>Hours <input id="flwh" type="number" inputmode="numeric" min="1" max="120" value="${w.hours}"></label></div>`;
   if(!hrs.length){ el.innerHTML = html + '<p>That time is outside the model forecast.</p>'; return; }
-  html += `<div class="flsum ${nPass === hrs.length ? 'ok' : 'no'}">${nPass === hrs.length ? `All ${hrs.length} hours meet every condition.`
-      : `${hrs.length - nPass} of ${hrs.length} hours don’t meet every condition.`}${hrs.length < w.hours ? ` (Only ${hrs.length} hours are in the model forecast.)` : ''}</div>
+  const sq = flSeqEval(f, model, {i0: hrs[0], i1: hrs[hrs.length - 1], hours: hrs.length}), allOk = nPass === hrs.length && sq.ok;
+  html += `<div class="flsum ${allOk ? 'ok' : 'no'}">${nPass === hrs.length ? `All ${hrs.length} hours meet every condition.`
+      : `${hrs.length - nPass} of ${hrs.length} hours don’t meet every condition.`}${seqOn ? (sq.ok ? ' Rain before/after: OK.' : ` Rain before/after: ${esc(sq.why.join('; '))}.`) : ''}${hrs.length < w.hours ? ` (Only ${hrs.length} hours are in the model forecast.)` : ''}</div>
+    ${seqOn ? `<div class="flseqres">${(() => { const q = f.seq || {}, out = [];
+      if(q.bMin != null || q.bMax != null) out.push(`<span class="${sq.before == null ? 'flm' : flOut(sq.before, {min: q.bMin, max: q.bMax}) ? 'omx' : 'omok'}">Rain in the ${q.bH || 24} h before: <b>${sq.before == null ? '–' : sq.before + ' mm'}</b></span>`);
+      if(q.aMin != null || q.aMax != null) out.push(`<span class="${sq.after == null ? 'flm' : flOut(sq.after, {min: q.aMin, max: q.aMax}) ? 'omx' : 'omok'}">Rain in the ${q.aH || 24} h after: <b>${sq.after == null ? '–' : sq.after + ' mm'}</b></span>`);
+      if(q.minRun != null) out.push(`<span class="${hrs.length < q.minRun ? 'omx' : 'omok'}">Length ${hrs.length} h (needs ≥ ${q.minRun})</span>`);
+      return out.join(' '); })()}</div>` : ''}
     <table class="omt flt"><thead><tr><th>Time</th>${FL_HOUR.map(x => `<th>${esc(x[1].replace(' (10 m average)', '').replace('Humidity (RH) %', 'RH %').replace('Wind gusts km/h', 'Gust').replace('Rain mm in the hour', 'Rain mm').replace('Temperature °C', 'Temp °C'))}</th>`).join('')}<th></th></tr></thead><tbody>`;
   hrs.forEach((i, j) => { const e = ev[j], t = h.time[i];
     html += `<tr class="fl${e.state}"><td>${datesIn.length > 1 ? esc(dLab(t.slice(0, 10))) + ' ' : ''}${t.slice(11, 16)}</td>${FL_HOUR.map(([k, , v]) => {
@@ -1876,11 +1961,16 @@ flSheet.addEventListener('change', e => {
     if(raw !== '' && !isFinite(v)){ t.value = ''; return; }
     const lim = pin.filter.lim[k] = pin.filter.lim[k] || {}; lim[side] = v;
     if(lim.min == null && lim.max == null) delete pin.filter.lim[k];
-    if(!flActive(pin.filter).length && pin.filter.active){ pin.filter.active = false; refreshPins(); }
-    const ab = flSheet.querySelector('.flact'); if(ab && (!!flActive(pin.filter).length) !== !!ab.querySelector('button')) setTimeout(() => flDraw(flSheet._fd), 0);
+    flAfterEdit(pin);
     t.closest('tr').classList.toggle('set', !!pin.filter.lim[k]);
     const st = $('flsumtxt'); if(st) st.innerHTML = flSummary(pin, flSheet._fd);
     savePins(); flResults(); if(pin.filter.active) fcRefreshFl(); return; }
+  if(t.dataset.seq){ const k = t.dataset.seq, raw = t.value.trim(); let v = raw === '' ? null : Number(raw);
+    if(raw !== '' && !isFinite(v)){ t.value = ''; return; }
+    if(v != null && ['bH', 'aH', 'minRun'].includes(k)){ v = Math.max(1, Math.min(72, Math.round(v))); t.value = v; }
+    if(v != null && v < 0){ v = 0; t.value = 0; }
+    pin.filter.seq = pin.filter.seq || {}; if(v == null) delete pin.filter.seq[k]; else pin.filter.seq[k] = v;
+    flAfterEdit(pin); savePins(); flResults(); if(pin.filter.active) fcRefreshFl(); return; }
   if(['flwd', 'flws', 'flwh'].includes(t.id)){
     pin.filter.win = {date: $('flwd').value, start: +$('flws').value, hours: Math.max(1, Math.min(120, Math.round(+$('flwh').value || 1)))};
     savePins(); flResults(); }
@@ -1891,14 +1981,14 @@ flSheet.addEventListener('click', e => {
   if(b.id === 'flclose'){ flSheet.hidden = true; flPin = null; if(flMarker){ map.removeLayer(flMarker); flMarker = null; } return; }
   if(b.dataset.fltab){ pin.filter.tab = b.dataset.fltab; savePins(); flSheet.querySelectorAll('[data-fltab]').forEach(x => x.classList.toggle('on', x === b)); flResults(); return; }
   if(b.dataset.flwin){ const [date, start, hours] = b.dataset.flwin.split('|'); pin.filter.win = {date, start: +start, hours: +hours}; pin.filter.tab = 'check'; savePins(); flDraw(flSheet._fd); return; }
-  const setLim = lim => { pin.filter.lim = JSON.parse(JSON.stringify(lim)); if(!flActive(pin.filter).length) pin.filter.active = false;
+  const setLim = d => { pin.filter.lim = flClone(d.lim); pin.filter.seq = flClone(d.seq); if(!flHasAny(pin.filter)) pin.filter.active = false;
     savePins(); refreshPins(); flCondOpen = true; flDraw(flSheet._fd); fcRefreshFl(); };
-  if(b.id === 'flapply'){ if(flActive(pin.filter).length && !confirm('Replace this filter’s conditions with your defaults?')) return; setLim(flMyDefaults()); return; }
-  if(b.id === 'flblank'){ if(flActive(pin.filter).length && !confirm('Clear all conditions in this filter?')) return; setLim({}); return; }
-  if(b.id === 'flsavedef'){ if(!flActive(pin.filter).length){ alert('Set at least one condition first.'); return; }
+  if(b.id === 'flapply'){ if(flHasAny(pin.filter) && !confirm('Replace this filter’s conditions with your defaults?')) return; setLim(flMyDefaults()); return; }
+  if(b.id === 'flblank'){ if(flHasAny(pin.filter) && !confirm('Clear all conditions in this filter?')) return; setLim({lim: {}, seq: {}}); return; }
+  if(b.id === 'flsavedef'){ if(!flHasAny(pin.filter)){ alert('Set at least one condition first.'); return; }
     if(!confirm(`Save these as your defaults?\n${flSummary(pin).replace(/&[^;]+;/g, '')}`)) return;
-    ls.set(FLDEFKEY, JSON.parse(JSON.stringify(pin.filter.lim))); flCondOpen = true; flDraw(flSheet._fd); return; }
-  if(b.id === 'florig'){ if(!confirm(`Restore the original defaults (${flSummaryOf(FL_ORIGINAL)})? Your saved defaults are replaced; this filter is unchanged.`)) return;
+    ls.set(FLDEFKEY, {lim: flClone(pin.filter.lim), seq: flClone(pin.filter.seq)}); flCondOpen = true; flDraw(flSheet._fd); return; }
+  if(b.id === 'florig'){ if(!confirm(`Restore the original defaults (${flSummaryOf({lim: FL_ORIGINAL})})? Your saved defaults are replaced; this filter is unchanged.`)) return;
     ls.del(FLDEFKEY); flCondOpen = true; flDraw(flSheet._fd); return; }
   if(b.id === 'flactive'){ pin.filter.active = !pin.filter.active; savePins(); refreshPins(); flDraw(flSheet._fd); fcRefreshFl(); return; }
   if(b.id === 'flclear'){ if(!confirm(`Remove the conditions filter from ${pin.name}? The pin stays.`)) return;
@@ -1907,20 +1997,12 @@ flSheet.addEventListener('click', e => {
 });
 const fcRefreshFl = () => { try { if(fcLast && !fcSheet.hidden) showForecast(fcLast.lat, fcLast.lng, fcLast.name); } catch(e){} };
 
-// ⏱ button: tap, then tap a spot to drop a pin with a filter
-let flMode = false;
-const setFlMode = on => { flMode = on; $('flmode').classList.toggle('on', on);
-  if(on){ setPinMode(false); if(typeof setFcMode === 'function') setFcMode(false); statusEl.textContent = 'Tap a spot to set a conditions filter there.'; }
-  map.getContainer().style.cursor = on ? 'crosshair' : ''; };
-$('flmode').onclick = () => setFlMode(!flMode);
-['pinmode', 'fcmode'].forEach(id => $(id).addEventListener('click', () => { if(flMode){ flMode = false; $('flmode').classList.remove('on'); } }));
-map.on('click', e => {
-  if(!flMode || aligning) return;
-  setFlMode(false);
-  const near = pins.find(p => haversine([p.lat, p.lng], [e.latlng.lat, e.latlng.lng]) < 25);
-  const pin = near || addPin(e.latlng.lat, e.latlng.lng, `Filter site ${pins.filter(p => p.filter).length + 1}`, false);
+// Open the filter for a spot (from the 🌦 panel): uses a pin within 25 m, otherwise drops one
+function openFilterAt(lat, lng, name){
+  const near = pins.find(p => haversine([p.lat, p.lng], [lat, lng]) < 25);
+  const pin = near || addPin(lat, lng, name ? name : `Filter site ${pins.filter(p => p.filter).length + 1}`, false);
   openFilter(pin);
-});
+}
 
 // Highlight the TFS part of the 🌦 panel for a filtered spot: day headings get ✓ / ✕ and a summary line
 async function flMarkTFS(){
