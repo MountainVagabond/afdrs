@@ -1709,10 +1709,15 @@ async function flData(pin){
     try {
       const [data, b] = await Promise.all([fcLoad('fwf_latest.json'), fcBounds || fcLoad('boundaries.json')]); fcBounds = b;
       const dist = locate(b.districts, pin.lat, pin.lng, 5), lga = locate(b.lgas, pin.lat, pin.lng, 3);
-      out.dn = dist ? dist.f.name : ''; out.ln = lga ? lga.f.name : '';
+      // Council: the ABS council boundary the spot is inside. District: the one the TFS detailed fire weather forecast
+      // lists that council under (e.g. Huon Valley, Derwent Valley and Waratah-Wynyard are listed under Western),
+      // falling back to the district boundary the spot is inside if the council isn't found in the forecast.
+      out.geoDn = dist ? dist.f.name : ''; out.ln = lga ? lga.f.name : ''; out.dn = out.geoDn; out.dnFrom = 'boundary';
+      if(out.ln) for(const d of (data.days || [])){ const k = Object.keys(d.districts || {}).find(kk => (d.districts[kk].subs || []).some(s => normName(s.name) === normName(out.ln)));
+        if(k){ out.dn = k; out.dnFrom = 'forecast'; break; } }
       for(const d of (data.days || [])){
-        const D = (d.districts || {})[out.dn] || null; let sub = null;
-        if(out.ln) for(const kk of Object.keys(d.districts || {})){ const s = (d.districts[kk].subs || []).find(s => normName(s.name) === normName(out.ln)); if(s){ sub = s; break; } }
+        const D = (d.districts || {})[out.dn] || null;
+        const sub = out.ln && D ? (D.subs || []).find(s => normName(s.name) === normName(out.ln)) || null : null;
         const row = out.daily[d.date] = out.daily[d.date] || {};
         row.fdrCouncil = sub ? fdrIdx(sub.rating) : null; row.fbiCouncil = sub && sub.fbi != null ? +sub.fbi : null;
         row.fbiDist = D && D.fbi != null ? +D.fbi : null; row.ratingDist = D ? D.rating : ''; row.fdrDist = D ? fdrIdx(D.rating) : null;
@@ -1871,7 +1876,9 @@ function flDraw(fd){
   const f = pin.filter;
   flSheet.innerHTML = `<div class="fh"><div><h2>⏱ Conditions filter · ${esc(pin.name)}</h2>
       <div class="sub">${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)} · ${fmtMGA(pin.lat, pin.lng)}</div>
-      ${fd && (fd.dn || fd.ln) ? `<div class="sub">District: <b>${esc(fd.dn || '–')}</b> · Council: <b>${esc(fd.ln || '–')}</b></div>` : ''}</div>
+      ${fd && (fd.dn || fd.ln) ? `<div class="sub">Council: <b>${esc(fd.ln || '–')}</b> · District: <b>${esc(fd.dn ? fd.dn + ' District' : '–')}</b>${fd.dnFrom === 'forecast'
+          ? ' (as listed in the TFS detailed fire weather forecast)' : fd.dn ? ' (from the district boundary: council not found in the forecast)' : ''}${fd.geoDn && fd.dn && fd.geoDn !== fd.dn
+          ? `. The spot is inside the ${esc(fd.geoDn)} District boundary, but TFS lists ${esc(fd.ln)} under ${esc(fd.dn)}.` : ''}</div>` : ''}</div>
       <button type="button" id="flclose" title="Close">✕</button></div>
     <div class="fb">${flLimitsHTML(pin, fd)}
       <div class="flact ${f.active ? 'on' : ''}">${flHasAny(f)
